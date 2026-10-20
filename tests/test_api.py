@@ -580,3 +580,173 @@ def test_viewer_cannot_download_import_templates_or_read_import_history(client: 
     assert client.get("/api/v1/imports/clients", headers=headers).status_code == 403
     assert client.get("/api/v1/imports/client-template.csv", headers=headers).status_code == 403
     assert client.get("/api/v1/imports/client-template.xlsx", headers=headers).status_code == 403
+
+
+
+def create_client_record(client: TestClient, token: str, legal_name: str) -> dict:
+    response = client.post(
+        "/api/v1/clients",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"legal_name": legal_name},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_client_task_lifecycle_and_filters(client: TestClient):
+    provision(client, "tarefas", "owner@example.com")
+    token = login(client, "tarefas", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente de Teste LTDA")
+    teammate = create_user(client, token, "assistente@example.com", "assistant", "Assistente Contábil")
+
+    created = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={
+            "client_id": company["id"],
+            "title": "Solicitar extratos bancários",
+            "description": "Enviar extratos referentes ao mês anterior.",
+            "kind": "document",
+            "priority": "high",
+            "due_date": "2026-11-05",
+            "assigned_to_user_id": teammate["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    task = created.json()
+    assert task["client_name"] == "Cliente de Teste LTDA"
+    assert task["assigned_to_name"] == "Assistente Contábil"
+    assert task["status"] == "open"
+    assert task["due_date"] == "2026-11-05"
+
+    listed = client.get("/api/v1/tasks", headers=headers)
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [task["id"]]
+    filtered = client.get("/api/v1/tasks?status=open&client_id=" + company["id"], headers=headers)
+    assert filtered.status_code == 200
+    assert len(filtered.json()) == 1
+    assert client.get("/api/v1/tasks?status=not-a-status", headers=headers).status_code == 422
+
+    received = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        headers=headers,
+        json={"status": "received"},
+    )
+    assert received.status_code == 200, received.text
+    assert received.json()["status"] == "received"
+    assert received.json()["completed_at"] is None
+
+    completed = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        headers=headers,
+        json={"status": "completed"},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "completed"
+    assert completed.json()["completed_at"] is not None
+
+    reopened = client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        headers=headers,
+        json={"status": "open", "due_date": None, "assigned_to_user_id": None},
+    )
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["status"] == "open"
+    assert reopened.json()["due_date"] is None
+    assert reopened.json()["assigned_to_user_id"] is None
+    assert reopened.json()["completed_at"] is None
+
+
+def test_client_tasks_are_isolated_by_tenant_and_validate_client_and_assignee(client: TestClient):
+    provision(client, "tarefas-a", "owner-a@example.com")
+    token_a = login(client, "tarefas-a", "owner-a@example.com")
+    company_a = create_client_record(client, token_a, "Cliente Particular A")
+    task_response = client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token_a}"},
+        json={"client_id": company_a["id"], "title": "Enviar documentos do mês"},
+    )
+    assert task_response.status_code == 201, task_response.text
+    task_id = task_response.json()["id"]
+
+    provision(client, "tarefas-b", "owner-b@example.com")
+    token_b = login(client, "tarefas-b", "owner-b@example.com")
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    assert client.get("/api/v1/tasks", headers=headers_b).json() == []
+    assert client.patch(
+        f"/api/v1/tasks/{task_id}", headers=headers_b, json={"status": "completed"}
+    ).status_code == 404
+    assert client.post(
+        "/api/v1/tasks",
+        headers=headers_b,
+        json={"client_id": company_a["id"], "title": "Tentar vincular cliente alheio"},
+    ).status_code == 404
+
+    foreign_staff = create_user(client, token_b, "assistente-b@example.com", "assistant")
+    assert client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {token_a}"},
+        json={
+            "client_id": company_a["id"],
+            "title": "Responsável de outro escritório",
+            "assigned_to_user_id": foreign_staff["id"],
+        },
+    ).status_code == 422
+
+
+def test_viewer_can_read_but_cannot_create_or_update_client_tasks(client: TestClient):
+    provision(client, "tarefas-viewer", "owner@example.com")
+    owner_token = login(client, "tarefas-viewer", "owner@example.com")
+    company = create_client_record(client, owner_token, "Cliente Consulta")
+    task_response = client.post(
+        "/api/v1/tasks",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"client_id": company["id"], "title": "Contrato social atualizado", "kind": "document"},
+    )
+    assert task_response.status_code == 201, task_response.text
+    task_id = task_response.json()["id"]
+
+    create_user(client, owner_token, "consulta@example.com", "viewer")
+    viewer_token = login(client, "tarefas-viewer", "consulta@example.com")
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+    assert len(client.get("/api/v1/tasks", headers=viewer_headers).json()) == 1
+    assert client.post(
+        "/api/v1/tasks",
+        headers=viewer_headers,
+        json={"client_id": company["id"], "title": "Não pode criar pendência"},
+    ).status_code == 403
+    assert client.patch(
+        f"/api/v1/tasks/{task_id}",
+        headers=viewer_headers,
+        json={"status": "completed"},
+    ).status_code == 403
+
+
+def test_client_task_rejects_invalid_values_and_missing_title(client: TestClient):
+    provision(client, "tarefas-validacao", "owner@example.com")
+    token = login(client, "tarefas-validacao", "owner@example.com")
+    company = create_client_record(client, token, "Cliente para Validação")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "x"},
+    ).status_code == 422
+    assert client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Prioridade desconhecida", "priority": "critical"},
+    ).status_code == 422
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Pendência válida"},
+    )
+    assert task.status_code == 201
+    assert client.patch(
+        f"/api/v1/tasks/{task.json()['id']}",
+        headers=headers,
+        json={"title": None},
+    ).status_code == 422

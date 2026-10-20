@@ -87,7 +87,7 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 ## Funcionalidades ainda não implementadas
 
 - Convites por e-mail, recuperação de senha e MFA.
-- Gestão documental, pendências e rotinas contábeis.
+- Anexos de documentos, notificações e rotinas contábeis automatizadas.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
@@ -103,6 +103,16 @@ A importação é dividida em etapas: envio e validação, revisão das linhas s
 Na tela **Importações**, baixe o modelo CSV ou Excel, preencha uma linha por cliente e consulte o histórico dos últimos 50 lotes, com arquivo, data, responsável, situação e total importado. Lotes pendentes podem ser abertos ou descartados. O modelo Excel inclui uma aba de instruções; mantenha CNPJ/CPF como texto para preservar zeros à esquerda.
 
 Endpoints: `GET /api/v1/imports/client-template.csv`, `GET /api/v1/imports/client-template.xlsx`, `GET /api/v1/imports/clients?limit=50`, `POST /api/v1/imports/clients/preview` (multipart com campo `file`), `GET /api/v1/imports/clients/{batch_id}`, `POST /api/v1/imports/clients/{batch_id}/confirm` e `DELETE /api/v1/imports/clients/{batch_id}` (descarta o lote mantendo histórico). Os perfis de consulta (viewer) não podem importar ou consultar o histórico.
+
+## Pendências e documentos por cliente
+
+Acesse **Pendências e documentos** no menu lateral para registrar documentos solicitados, acompanhamentos e rotinas internas vinculadas a um cliente. Cada item pode ter descrição, prioridade, prazo e um responsável interno ativo do mesmo escritório.
+
+Situações disponíveis: **Pendente**, **Recebido**, **Concluído** e **Cancelado**. Documentos podem ser marcados como recebidos e depois concluídos; itens encerrados podem ser reabertos. Pendências vencidas são destacadas na tela. Alterações e mudanças de estado geram eventos na auditoria.
+
+Endpoints: `GET /api/v1/tasks?limit=100` com filtros opcionais `status` e `client_id`; `POST /api/v1/tasks` para criar e `PATCH /api/v1/tasks/{task_id}` para atualizar. O perfil Consulta pode visualizar, mas não criar nem atualizar. Todos os acessos são limitados ao escritório do token; cliente e responsável atribuídos são validados no servidor.
+
+Este módulo é um controle operacional manual. Não anexa arquivos físicos, envia mensagens ao cliente, transmite declarações, calcula tributos nem executa prazos fiscais automaticamente.
 
 ## Perfis de acesso
 
