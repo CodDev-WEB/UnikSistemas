@@ -326,6 +326,22 @@ export default function App() {
     }
   }, []);
 
+  useEffect(() => {
+    const awaitingScan = documents.some(document =>
+      document.scan_status === "pending" || document.scan_status === "scanning"
+    );
+    if (!token || currentPage !== "tasks" || !awaitingScan) return;
+    const refreshTimer = window.setInterval(async () => {
+      try {
+        const rows = await api<ClientDocument[]>("/api/v1/documents?limit=100", {}, token);
+        setDocuments(rows);
+      } catch {
+        // Keep the current quarantine state visible; the next poll can recover.
+      }
+    }, 15000);
+    return () => window.clearInterval(refreshTimer);
+  }, [token, currentPage, documents]);
+
   const loadNotifications = useCallback(async (activeToken: string, canManageEmail: boolean) => {
     setNotificationsLoading(true);
     try {
