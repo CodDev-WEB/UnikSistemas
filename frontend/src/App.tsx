@@ -66,7 +66,8 @@ const taskKindLabels: Record<ClientTask["kind"], string> = {
 const taskPriorityLabels: Record<ClientTask["priority"], string> = {
   low: "Baixa", normal: "Normal", high: "Alta",
 };
-type TokenResponse = { access_token: string; token_type: string; expires_in: number };\n
+type TokenResponse = { access_token: string; token_type: string; expires_in: number };
+
 type ClientDocument = {
   id: string; task_id: string; task_title: string; client_name: string;
   original_filename: string; content_type: string; file_size: number; sha256: string;
@@ -193,7 +194,8 @@ function PublicDocumentUploadPage({ token }: { token: string }) {
     </main>
   );
 }
-\nfunction initials(name: string) {
+
+function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(part => part[0]?.toUpperCase() ?? "").join("");
 }
 
@@ -212,12 +214,16 @@ function formatDateTime(value: string | null) {
 }
 
 export default function App() {
+  const publicUploadToken = window.location.pathname.match(/^\/document-upload\/([^/]+)\/?$/)?.[1] ?? "";
   const [token, setToken] = useState(() => sessionStorage.getItem("unik_access_token") ?? "");
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks">("dashboard");
-  const [tasks, setTasks] = useState<ClientTask[]>([]);\n  const [documents, setDocuments] = useState<ClientDocument[]>([]);\n  const [taskUploadLinks, setTaskUploadLinks] = useState<Record<string, ActiveUploadLink>>({});\n  const [taskLinkBusy, setTaskLinkBusy] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [taskUploadLinks, setTaskUploadLinks] = useState<Record<string, ActiveUploadLink>>({});
+  const [taskLinkBusy, setTaskLinkBusy] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus>("open");
   const [taskClientFilter, setTaskClientFilter] = useState("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -263,8 +269,12 @@ export default function App() {
   const loadClientTasks = useCallback(async (activeToken: string) => {
     setTasksLoading(true);
     try {
-      const rows = await api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken);
+      const [rows, files] = await Promise.all([
+        api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken),
+        api<ClientDocument[]>("/api/v1/documents?limit=100", {}, activeToken),
+      ]);
       setTasks(rows);
+      setDocuments(files);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar as pendências.");
@@ -294,7 +304,9 @@ export default function App() {
       setImportFile(null);
       setImportBatch(null);
       setImportHistory([]);
-      setTasks([]);\n      setDocuments([]);\n      setTaskUploadLinks({});
+      setTasks([]);
+      setDocuments([]);
+      setTaskUploadLinks({});
       setShowTaskForm(false);
       setTaskForm({
     client_id: "", title: "", description: "", kind: "document",
@@ -741,7 +753,9 @@ export default function App() {
     setCurrentPage("dashboard");
   }
 
-  if (publicUploadToken) return <PublicDocumentUploadPage token={publicUploadToken}/>;\n\n  if (token && loading && !me) {
+  if (publicUploadToken) return <PublicDocumentUploadPage token={publicUploadToken}/>;
+
+  if (token && loading && !me) {
     return <main className="login-screen"><section className="login-panel loading-state"><div className="spinner"/><span>Preparando seu espaço de trabalho...</span></section></main>;
   }
 
