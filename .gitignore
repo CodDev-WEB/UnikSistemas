@@ -7,3 +7,6 @@ __pycache__/
 htmlcov/
 *.db
 .DS_Store
+
+# Backups contain database records and confidential client documents.
+backups/
