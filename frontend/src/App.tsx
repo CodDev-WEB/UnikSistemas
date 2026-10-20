@@ -322,6 +322,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (publicUploadToken) {
+      setLoading(false);
+      return;
+    }
     if (token) {
       void loadWorkspace(token);
     } else {
@@ -342,7 +346,7 @@ export default function App() {
       setTaskSearch("");
       setCurrentPage("dashboard");
     }
-  }, [token, loadWorkspace]);
+  }, [token, loadWorkspace, publicUploadToken]);
 
   useEffect(() => {
     if (token && me && currentPage === "imports") {
