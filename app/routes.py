@@ -937,7 +937,7 @@ def _resolve_upload_link(db: Session, token: str, lock: bool = False):
         DocumentUploadLink.token_hash == _token_digest(token)
     )
     if lock:
-        query = query.with_for_update()
+        query = query.with_for_update().execution_options(populate_existing=True)
     link = db.scalar(query)
     if (
         link is None
