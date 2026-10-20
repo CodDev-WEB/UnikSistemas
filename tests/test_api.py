@@ -893,3 +893,134 @@ def test_document_upload_links_and_downloads_respect_tenant_and_role(client: Tes
     )
     assert revoked.status_code == 204
     assert client.get(f"/api/v1/public/document-upload/{second_token}").status_code == 404
+
+
+def test_public_document_upload_download_and_staff_review(client: TestClient):
+    provision(client, "documentos-fluxo", "owner@example.com")
+    token = login(client, "documentos-fluxo", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente do Documento")
+    task_response = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Enviar extrato bancário", "kind": "document"},
+    )
+    assert task_response.status_code == 201, task_response.text
+    task_id = task_response.json()["id"]
+
+    link_response = client.post(f"/api/v1/tasks/{task_id}/upload-link", headers=headers)
+    assert link_response.status_code == 201, link_response.text
+    link = link_response.json()
+    assert link["max_uploads"] == 5
+    raw_token = link["public_path"].rsplit("/", 1)[-1]
+
+    public_info = client.get(f"/api/v1/public/document-upload/{raw_token}")
+    assert public_info.status_code == 200, public_info.text
+    assert public_info.json()["remaining_uploads"] == 5
+
+    pdf_bytes = b"%PDF-1.7\\nconteudo de teste"
+    upload = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("extrato.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+    assert upload.json()["review_status"] == "pending"
+
+    tasks = client.get("/api/v1/tasks?limit=100", headers=headers)
+    assert next(item for item in tasks.json() if item["id"] == task_id)["status"] == "received"
+    listing = client.get(f"/api/v1/documents?task_id={task_id}", headers=headers)
+    assert listing.status_code == 200, listing.text
+    assert len(listing.json()) == 1
+    assert listing.json()[0]["original_filename"] == "extrato.pdf"
+
+    download = client.get(f"/api/v1/documents/{document_id}/download", headers=headers)
+    assert download.status_code == 200
+    assert download.content == pdf_bytes
+    assert download.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in download.headers["content-disposition"]
+
+    reviewed = client.patch(
+        f"/api/v1/documents/{document_id}",
+        headers=headers,
+        json={"review_status": "accepted", "review_note": "Arquivo conferido."},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["review_status"] == "accepted"
+    assert reviewed.json()["review_note"] == "Arquivo conferido."
+    assert client.get(f"/api/v1/public/document-upload/{raw_token}").json()["remaining_uploads"] == 4
+
+
+def test_document_upload_rejects_unsupported_and_mismatched_files(client: TestClient):
+    provision(client, "documentos-validacao", "owner@example.com")
+    token = login(client, "documentos-validacao", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente Validação")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Enviar documento", "kind": "document"},
+    )
+    link = client.post(f"/api/v1/tasks/{task.json()['id']}/upload-link", headers=headers).json()
+    raw_token = link["public_path"].rsplit("/", 1)[-1]
+
+    unsupported = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("arquivo.bin", b"conteudo sem formato permitido", "application/octet-stream")},
+    )
+    assert unsupported.status_code == 422
+    fake_pdf = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("arquivo.pdf", b"conteudo que nao e pdf", "application/pdf")},
+    )
+    assert fake_pdf.status_code == 422
+    assert client.get(f"/api/v1/public/document-upload/{raw_token}").json()["remaining_uploads"] == 5
+    assert client.get("/api/v1/documents", headers=headers).json() == []
+
+
+def test_document_upload_links_and_files_respect_tenant_and_role(client: TestClient):
+    provision(client, "documentos-tenant-a", "owner-a@example.com")
+    token_a = login(client, "documentos-tenant-a", "owner-a@example.com")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    company_a = create_client_record(client, token_a, "Cliente A")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers_a,
+        json={"client_id": company_a["id"], "title": "Documento privado", "kind": "document"},
+    )
+    task_id = task.json()["id"]
+    first_link = client.post(f"/api/v1/tasks/{task_id}/upload-link", headers=headers_a).json()
+    first_token = first_link["public_path"].rsplit("/", 1)[-1]
+    second_link = client.post(f"/api/v1/tasks/{task_id}/upload-link", headers=headers_a).json()
+    second_token = second_link["public_path"].rsplit("/", 1)[-1]
+    assert client.get(f"/api/v1/public/document-upload/{first_token}").status_code == 404
+
+    upload = client.post(
+        f"/api/v1/public/document-upload/{second_token}/files",
+        files={"file": ("privado.pdf", b"%PDF-1.4\\nprivado", "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+
+    provision(client, "documentos-tenant-b", "owner-b@example.com")
+    token_b = login(client, "documentos-tenant-b", "owner-b@example.com")
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    assert client.get("/api/v1/documents", headers=headers_b).json() == []
+    assert client.get(f"/api/v1/documents/{document_id}/download", headers=headers_b).status_code == 404
+
+    create_user(client, token_a, "consulta@example.com", "viewer")
+    viewer_token = login(client, "documentos-tenant-a", "consulta@example.com")
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+    assert client.post(f"/api/v1/tasks/{task_id}/upload-link", headers=viewer_headers).status_code == 403
+    assert client.patch(
+        f"/api/v1/documents/{document_id}",
+        headers=viewer_headers,
+        json={"review_status": "accepted"},
+    ).status_code == 403
+
+    revoked = client.post(
+        f"/api/v1/tasks/{task_id}/upload-links/{second_link['id']}/revoke",
+        headers=headers_a,
+    )
+    assert revoked.status_code == 204
+    assert client.get(f"/api/v1/public/document-upload/{second_token}").status_code == 404
