@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, Check, ChevronDown,
-  CircleHelp, FileText, LayoutDashboard, LockKeyhole, LogOut, Menu, Plus,
+  CircleHelp, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus,
   Search, Settings2, ShieldCheck, Users, X,
 } from "lucide-react";
 
@@ -150,6 +150,10 @@ export default function App() {
     setError("");
     setSuccess("");
     setCurrentPage("dashboard");
+  }
+
+  if (token && loading && !me) {
+    return <main className="login-screen"><section className="login-panel loading-state"><div className="spinner"/><span>Preparando seu espaço de trabalho...</span></section></main>;
   }
 
   if (!token || !me) {
