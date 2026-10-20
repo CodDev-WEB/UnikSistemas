@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import EmailStr, Field, model_validator
+from pydantic import EmailStr, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,8 +32,19 @@ class Settings(BaseSettings):
     app_base_url: str | None = None
     notification_timezone: str = "America/Santarem"
 
+    @field_validator("smtp_from_email", mode="before")
+    @classmethod
+    def blank_smtp_sender_to_none(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_production_secrets(self):
+        try:
+            ZoneInfo(self.notification_timezone)
+        except ZoneInfoNotFoundError:
+            raise ValueError("NOTIFICATION_TIMEZONE deve ser um fuso IANA válido.") from None
         if self.email_notifications_enabled:
             if not self.smtp_host or not self.smtp_from_email:
                 raise ValueError("E-mail está habilitado, mas SMTP_HOST e SMTP_FROM_EMAIL não foram configurados.")
