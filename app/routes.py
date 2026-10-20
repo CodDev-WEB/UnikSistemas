@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.client_imports import MAX_IMPORT_ROWS, canonical_tax_id, parse_client_import, validate_import_rows
+from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
 from app.models import AuditLog, Client, ClientImportBatch, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
@@ -517,6 +517,8 @@ def confirm_client_import(
         batch.status = "confirmed"
         batch.imported_count = len(clients)
         batch.confirmed_at = utcnow()
+        # Client data now lives in the clients table; remove the copy stored for preview.
+        batch.preview_rows = []
         db.add(
             AuditLog(
                 tenant_id=current_user.tenant_id,
