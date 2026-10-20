@@ -12,7 +12,9 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Provisionamento controlado de escritório e usuário responsável.
 - Login por identificador do escritório, e-mail e senha, com JWT de expiração e hashes Argon2.
 - Cadastro, listagem e consulta de clientes isolados por tenant.
-- Auditoria inicial para criação de clientes.
+- Gestão de equipe: criar usuários, consultar a equipe, alterar papéis e ativar/desativar acessos.
+- Perfis iniciais: responsável, administrador, contador(a), assistente e consulta (somente leitura).
+- Auditoria inicial para criação de clientes e alterações de usuários.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
@@ -92,6 +94,18 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 
 Não exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
+
+## Perfis de acesso
+
+| Perfil | Permissões iniciais |
+|---|---|
+| Responsável | Administra a equipe e os clientes do escritório |
+| Administrador | Gerencia usuários comuns e clientes; não gerencia o responsável nem outros administradores |
+| Contador(a) | Consulta e cadastra clientes |
+| Assistente | Consulta e cadastra clientes |
+| Consulta | Visualiza clientes; não cadastra nem administra usuários |
+
+O perfil é verificado pela API, não apenas pela interface. Usuários e clientes são sempre consultados dentro do escritório associado ao token. A senha inicial é armazenada em hash, mas a entrega segura da senha ao colaborador ainda é um processo manual e deve ser feita por um canal seguro.
 
 ## Desenvolvimento
 
