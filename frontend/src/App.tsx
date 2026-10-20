@@ -218,7 +218,7 @@ export default function App() {
           <div><span className="brand-name">unik<span>sistemas</span></span><span className="brand-subtitle">GESTÃO CONTÁBIL</span></div>
         </div>
         <div className="workspace-label">ESCRITÓRIO ATUAL</div>
-        <button className="workspace-switch" type="button">
+        <button className="workspace-switch" type="button" disabled title="Escritório definido pela sessão autenticada">
           <div className="workspace-avatar">{initials(me.tenant.name) || "U"}</div>
           <div className="workspace-meta"><strong>{me.tenant.name}</strong><small>{me.tenant.slug}</small></div>
           <ChevronDown size={15} />
@@ -227,9 +227,9 @@ export default function App() {
         <nav className="sidebar-nav" aria-label="Navegação principal">
           <button className={currentPage === "dashboard" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("dashboard")}><LayoutDashboard size={18} /><span>Visão geral</span></button>
           <button className={currentPage === "clients" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("clients")}><Users size={18} /><span>Clientes</span><span className="nav-count">{clients.length}</span></button>
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado"><ArrowDownToLine size={18} /><span>Importações</span><span className="soon">EM BREVE</span></button>
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado"><FileText size={18} /><span>Documentos</span></button>
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado"><Activity size={18} /><span>Pendências</span></button>
+          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><ArrowDownToLine size={18} /><span>Importações</span><span className="soon">EM BREVE</span></button>
+          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><FileText size={18} /><span>Documentos</span></button>
+          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><Activity size={18} /><span>Pendências</span></button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note"><div className="note-icon"><ShieldCheck size={16} /></div><div><strong>Seu espaço, seus dados</strong><p>O acesso é restrito ao escritório autenticado.</p></div></div>
