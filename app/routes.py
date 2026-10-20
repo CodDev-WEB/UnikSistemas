@@ -1,16 +1,20 @@
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from pathlib import PurePosixPath
+
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import AuditLog, Client, Tenant, User
+from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
+from app.models import AuditLog, Client, ClientImportBatch, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
+    ClientImportBatchRead,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -337,3 +341,200 @@ def get_client(
     if client is None:
         raise HTTPException(status_code=404, detail="Cliente não encontrado.")
     return client
+
+
+
+CLIENT_EDITOR_ROLES = {"owner", "admin", "accountant", "assistant"}
+MAX_IMPORT_FILE_BYTES = 5 * 1024 * 1024
+
+
+def _require_client_editor(user: User) -> None:
+    if user.role not in CLIENT_EDITOR_ROLES:
+        raise HTTPException(status_code=403, detail="Seu perfil não permite importar clientes.")
+
+
+def _serialize_import_batch(batch: ClientImportBatch) -> dict:
+    return {
+        "id": batch.id,
+        "filename": batch.filename,
+        "status": batch.status,
+        "total_rows": batch.total_rows,
+        "imported_count": batch.imported_count,
+        "rows": batch.preview_rows,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "confirmed_at": batch.confirmed_at.isoformat() if batch.confirmed_at else None,
+    }
+
+
+@router.post(
+    "/imports/clients/preview",
+    response_model=ClientImportBatchRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Imports"],
+)
+async def preview_client_import(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Parse and validate a CSV/XLSX without creating any clients."""
+    _require_client_editor(current_user)
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="Selecione um arquivo para importar.")
+
+    filename = PurePosixPath(file.filename.replace("\\", "/")).name[:255]
+    try:
+        content = await file.read(MAX_IMPORT_FILE_BYTES + 1)
+        if len(content) > MAX_IMPORT_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="O arquivo ultrapassa o limite de 5 MiB.",
+            )
+        try:
+            source_rows = parse_client_import(filename, content)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+    finally:
+        await file.close()
+
+    existing_ids = {
+        key
+        for value in db.scalars(
+            select(Client.tax_id).where(
+                Client.tenant_id == current_user.tenant_id,
+                Client.tax_id.is_not(None),
+            )
+        ).all()
+        if (key := canonical_tax_id(value))
+    }
+    preview_rows = validate_import_rows(source_rows, existing_ids)
+    batch = ClientImportBatch(
+        tenant_id=current_user.tenant_id,
+        created_by_user_id=current_user.id,
+        filename=filename,
+        status="ready" if all(not row["errors"] for row in preview_rows) else "invalid",
+        preview_rows=preview_rows,
+        total_rows=len(preview_rows),
+        imported_count=0,
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _serialize_import_batch(batch)
+
+
+@router.get("/imports/clients/{batch_id}", response_model=ClientImportBatchRead, tags=["Imports"])
+def read_client_import_preview(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_client_editor(current_user)
+    batch = db.scalar(
+        select(ClientImportBatch).where(
+            ClientImportBatch.id == batch_id,
+            ClientImportBatch.tenant_id == current_user.tenant_id,
+        )
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Importação não encontrada.")
+    return _serialize_import_batch(batch)
+
+
+@router.post(
+    "/imports/clients/{batch_id}/confirm",
+    response_model=ClientImportBatchRead,
+    tags=["Imports"],
+)
+def confirm_client_import(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Persist all rows atomically after a valid preview and explicit confirmation."""
+    _require_client_editor(current_user)
+    batch = db.scalar(
+        select(ClientImportBatch)
+        .where(
+            ClientImportBatch.id == batch_id,
+            ClientImportBatch.tenant_id == current_user.tenant_id,
+        )
+        .with_for_update()
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Importação não encontrada.")
+    if batch.status == "confirmed":
+        raise HTTPException(status_code=409, detail="Esta importação já foi confirmada.")
+    if batch.status != "ready" or any(row.get("errors") for row in batch.preview_rows):
+        raise HTTPException(
+            status_code=409,
+            detail="A prévia possui pendências. Corrija o arquivo e envie novamente antes de confirmar.",
+        )
+
+    existing_ids = {
+        key
+        for value in db.scalars(
+            select(Client.tax_id).where(
+                Client.tenant_id == current_user.tenant_id,
+                Client.tax_id.is_not(None),
+            )
+        ).all()
+        if (key := canonical_tax_id(value))
+    }
+    conflicts = [
+        row for row in batch.preview_rows
+        if (key := canonical_tax_id(row.get("tax_id"))) and key in existing_ids
+    ]
+    if conflicts:
+        updated_rows = [dict(row) for row in batch.preview_rows]
+        for row in updated_rows:
+            key = canonical_tax_id(row.get("tax_id"))
+            if key and key in existing_ids:
+                row["errors"] = sorted(set([*row.get("errors", []), "CNPJ/CPF já cadastrado neste escritório."]))
+        batch.preview_rows = updated_rows
+        batch.status = "invalid"
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="A base mudou após a prévia. Há CNPJ/CPF que já foi cadastrado; revise as linhas sinalizadas.",
+        )
+
+    try:
+        clients = [
+            Client(
+                tenant_id=current_user.tenant_id,
+                legal_name=row["legal_name"],
+                trade_name=row.get("trade_name"),
+                tax_id=row.get("tax_id"),
+                email=row.get("email"),
+                phone=row.get("phone"),
+                status=row.get("status") or "active",
+            )
+            for row in batch.preview_rows
+        ]
+        db.add_all(clients)
+        db.flush()
+        batch.status = "confirmed"
+        batch.imported_count = len(clients)
+        batch.confirmed_at = utcnow()
+        # Client data now lives in the clients table; remove the copy stored for preview.
+        batch.preview_rows = []
+        db.add(
+            AuditLog(
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="clients.imported",
+                entity_type="client_import",
+                entity_id=batch.id,
+                details={"imported_count": len(clients), "filename": batch.filename},
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Um ou mais identificadores fiscais já existem. Nenhum cliente foi importado; envie a base atualizada.",
+        ) from None
+    db.refresh(batch)
+    return _serialize_import_batch(batch)

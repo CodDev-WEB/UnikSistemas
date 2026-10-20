@@ -133,3 +133,26 @@ class UserUpdate(BaseModel):
     @classmethod
     def normalize_updated_name(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
+
+
+
+class ClientImportRowRead(BaseModel):
+    row_number: int
+    legal_name: str | None = None
+    trade_name: str | None = None
+    tax_id: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    status: str | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class ClientImportBatchRead(BaseModel):
+    id: str
+    filename: str
+    status: Literal["ready", "invalid", "confirmed"]
+    total_rows: int
+    imported_count: int
+    rows: list[ClientImportRowRead]
+    created_at: str | None = None
+    confirmed_at: str | None = None
