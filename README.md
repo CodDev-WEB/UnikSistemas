@@ -87,7 +87,6 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 ## Funcionalidades ainda não implementadas
 
 - Convites por e-mail, recuperação de senha e MFA.
-- Recuperação de senha e MFA.
 - Gestão documental, pendências e rotinas contábeis.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
@@ -99,9 +98,11 @@ Não exponha a aplicação à internet antes de implementar e revisar esses cont
 
 Acesse **Importações** pelo menu lateral para enviar CSV (UTF-8 ou Windows-1252) ou Excel (.xlsx). A planilha precisa ter uma primeira linha com títulos e a coluna **Razão Social** (ou `legal_name`). Colunas opcionais reconhecidas: Nome Fantasia, CNPJ/CPF, E-mail, Telefone e Status. O MVP aceita até 5 MiB e 1.000 linhas por arquivo.
 
-A importação é dividida em etapas: envio e validação, revisão das linhas sinalizadas e confirmação explícita. Se houver linha inválida ou identificador fiscal duplicado, o lote inteiro fica bloqueado; nenhum cliente é gravado parcialmente. A confirmação é transacional, restrita ao escritório autenticado e não pode ser repetida. Após a confirmação, os dados da prévia são apagados do lote; apenas o resultado resumido e o log de auditoria permanecem.
+A importação é dividida em etapas: envio e validação, revisão das linhas sinalizadas e confirmação explícita. Se houver linha inválida ou identificador fiscal duplicado, o lote inteiro fica bloqueado; nenhum cliente é gravado parcialmente. A confirmação é transacional, restrita ao escritório autenticado e não pode ser repetida. Após a confirmação ou descarte, o conteúdo da prévia é apagado; o registro resumido permanece no histórico e gera auditoria.
 
-Endpoints: `POST /api/v1/imports/clients/preview` (multipart com campo `file`), `GET /api/v1/imports/clients/{batch_id}` e `POST /api/v1/imports/clients/{batch_id}/confirm`. Os perfis de consulta (viewer) não podem importar. Use planilhas com CNPJ/CPF como texto para preservar zeros à esquerda.
+Na tela **Importações**, baixe o modelo CSV ou Excel, preencha uma linha por cliente e consulte o histórico dos últimos 50 lotes, com arquivo, data, responsável, situação e total importado. Lotes pendentes podem ser abertos ou descartados. O modelo Excel inclui uma aba de instruções; mantenha CNPJ/CPF como texto para preservar zeros à esquerda.
+
+Endpoints: `GET /api/v1/imports/client-template.csv`, `GET /api/v1/imports/client-template.xlsx`, `GET /api/v1/imports/clients?limit=50`, `POST /api/v1/imports/clients/preview` (multipart com campo `file`), `GET /api/v1/imports/clients/{batch_id}`, `POST /api/v1/imports/clients/{batch_id}/confirm` e `DELETE /api/v1/imports/clients/{batch_id}` (descarta o lote mantendo histórico). Os perfis de consulta (viewer) não podem importar ou consultar o histórico.
 
 ## Perfis de acesso
 
