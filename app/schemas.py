@@ -266,6 +266,9 @@ class ClientDocumentRead(BaseModel):
     content_type: str
     file_size: int
     sha256: str
+    scan_status: Literal["pending", "scanning", "clean", "infected", "error"]
+    scan_attempts: int
+    scan_completed_at: str | None = None
     review_status: Literal["pending", "accepted", "rejected"]
     review_note: str | None = None
     reviewed_by_name: str | None = None
