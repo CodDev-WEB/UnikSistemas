@@ -39,8 +39,13 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_settings] = lambda: test_settings
+    app.state.test_sessionmaker = testing_session
+    app.state.test_settings = test_settings
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+    for attribute in ("test_sessionmaker", "test_settings"):
+        if hasattr(app.state, attribute):
+            delattr(app.state, attribute)
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
