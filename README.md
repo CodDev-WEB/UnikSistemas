@@ -14,7 +14,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Cadastro, listagem e consulta de clientes isolados por tenant.
 - Gestão de equipe: criar usuários, consultar a equipe, alterar papéis e ativar/desativar acessos.
 - Perfis iniciais: responsável, administrador, contador(a), assistente e consulta (somente leitura).
-- Auditoria inicial para criação de clientes e alterações de usuários.
+- Importação assistida de clientes por CSV/XLSX, com prévia, validação, detecção de duplicidades e confirmação explícita.\n- Auditoria inicial para criação de clientes, importações confirmadas e alterações de usuários.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
@@ -94,6 +94,14 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 
 Não exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
+
+## Importação assistida de clientes
+
+Acesse **Importações** pelo menu lateral para enviar CSV (UTF-8 ou Windows-1252) ou Excel (.xlsx). A planilha precisa ter uma primeira linha com títulos e a coluna **Razão Social** (ou `legal_name`). Colunas opcionais reconhecidas: Nome Fantasia, CNPJ/CPF, E-mail, Telefone e Status. O MVP aceita até 5 MiB e 1.000 linhas por arquivo.
+
+A importação é dividida em etapas: envio e validação, revisão das linhas sinalizadas e confirmação explícita. Se houver linha inválida ou identificador fiscal duplicado, o lote inteiro fica bloqueado; nenhum cliente é gravado parcialmente. A confirmação é transacional, restrita ao escritório autenticado e não pode ser repetida. Após a confirmação, os dados da prévia são apagados do lote; apenas o resultado resumido e o log de auditoria permanecem.
+
+Endpoints: `POST /api/v1/imports/clients/preview` (multipart com campo `file`), `GET /api/v1/imports/clients/{batch_id}` e `POST /api/v1/imports/clients/{batch_id}/confirm`. Os perfis de consulta (viewer) não podem importar. Use planilhas com CNPJ/CPF como texto para preservar zeros à esquerda.
 
 ## Perfis de acesso
 
