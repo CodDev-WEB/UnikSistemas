@@ -150,9 +150,21 @@ class ClientImportRowRead(BaseModel):
 class ClientImportBatchRead(BaseModel):
     id: str
     filename: str
-    status: Literal["ready", "invalid", "confirmed"]
+    status: Literal["ready", "invalid", "confirmed", "discarded"]
     total_rows: int
     imported_count: int
     rows: list[ClientImportRowRead]
+    created_at: str | None = None
+    confirmed_at: str | None = None
+
+
+
+class ClientImportHistoryRead(BaseModel):
+    id: str
+    filename: str
+    status: Literal["ready", "invalid", "confirmed", "discarded"]
+    total_rows: int
+    imported_count: int
+    created_by_name: str | None = None
     created_at: str | None = None
     confirmed_at: str | None = None

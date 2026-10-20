@@ -455,5 +455,128 @@ def test_pending_client_import_preview_can_be_discarded(client: TestClient):
 
     discarded = client.delete(f"/api/v1/imports/clients/{batch_id}", headers=headers)
     assert discarded.status_code == 204
-    assert client.get(f"/api/v1/imports/clients/{batch_id}", headers=headers).status_code == 404
+    retained = client.get(f"/api/v1/imports/clients/{batch_id}", headers=headers)
+    assert retained.status_code == 200
+    assert retained.json()["status"] == "discarded"
+    assert retained.json()["rows"] == []
+    history = client.get("/api/v1/imports/clients", headers=headers)
+    assert history.status_code == 200
+    assert history.json()[0]["status"] == "discarded"
     assert client.get("/api/v1/clients", headers=headers).json() == []
+
+
+
+def test_client_import_templates_require_auth_and_have_expected_headers(client: TestClient):
+    unauthenticated_csv = client.get("/api/v1/imports/client-template.csv")
+    unauthenticated_xlsx = client.get("/api/v1/imports/client-template.xlsx")
+    assert unauthenticated_csv.status_code == 401
+    assert unauthenticated_xlsx.status_code == 401
+
+    provision(client, "modelo-planilha", "owner@example.com")
+    token = login(client, "modelo-planilha", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    csv_template = client.get("/api/v1/imports/client-template.csv", headers=headers)
+    assert csv_template.status_code == 200
+    assert "text/csv" in csv_template.headers["content-type"]
+    assert "attachment;" in csv_template.headers["content-disposition"]
+    csv_text = csv_template.content.decode("utf-8-sig")
+    csv_headers = csv_text.strip().splitlines()[0].split(";")
+    assert csv_headers == ["Razão Social", "Nome Fantasia", "CNPJ/CPF", "E-mail", "Telefone", "Status"]
+
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    xlsx_template = client.get("/api/v1/imports/client-template.xlsx", headers=headers)
+    assert xlsx_template.status_code == 200
+    workbook = load_workbook(BytesIO(xlsx_template.content), data_only=True)
+    assert workbook.sheetnames == ["Clientes", "Instruções"]
+    sheet = workbook["Clientes"]
+    assert [cell.value for cell in sheet[1]] == csv_headers
+    assert sheet["C2"].number_format == "@"
+    assert "preencha" in str(workbook["Instruções"]["A2"].value).lower()
+    workbook.close()
+
+
+def test_import_history_tracks_discarded_and_confirmed_batches_per_tenant(client: TestClient):
+    provision(client, "historico-a", "owner-a@example.com")
+    token_a = login(client, "historico-a", "owner-a@example.com")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+
+    discarded_preview = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers_a,
+        files={
+            "file": (
+                "clientes-pendentes.csv",
+                b"Razao Social;CNPJ\nEmpresa Descartada;55.555.555/0001-55\n",
+                "text/csv",
+            )
+        },
+    )
+    assert discarded_preview.status_code == 201, discarded_preview.text
+    discarded_id = discarded_preview.json()["id"]
+
+    before_discard = client.get("/api/v1/imports/clients", headers=headers_a)
+    assert before_discard.status_code == 200
+    assert len(before_discard.json()) == 1
+    assert before_discard.json()[0]["status"] == "ready"
+    assert before_discard.json()[0]["created_by_name"] == "Responsável Contábil"
+
+    discarded = client.delete(f"/api/v1/imports/clients/{discarded_id}", headers=headers_a)
+    assert discarded.status_code == 204
+
+    confirmed_preview = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers_a,
+        files={
+            "file": (
+                "clientes-confirmados.csv",
+                b"Razao Social;CNPJ\nEmpresa Confirmada;66.666.666/0001-66\n",
+                "text/csv",
+            )
+        },
+    )
+    assert confirmed_preview.status_code == 201, confirmed_preview.text
+    confirmed_id = confirmed_preview.json()["id"]
+    confirmed = client.post(
+        f"/api/v1/imports/clients/{confirmed_id}/confirm",
+        headers=headers_a,
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["rows"] == []
+
+    forbidden_delete_confirmed = client.delete(
+        f"/api/v1/imports/clients/{confirmed_id}", headers=headers_a
+    )
+    assert forbidden_delete_confirmed.status_code == 409
+
+    history = client.get("/api/v1/imports/clients?limit=20", headers=headers_a)
+    assert history.status_code == 200
+    rows = {row["id"]: row for row in history.json()}
+    assert rows[discarded_id]["status"] == "discarded"
+    assert rows[discarded_id]["imported_count"] == 0
+    assert rows[confirmed_id]["status"] == "confirmed"
+    assert rows[confirmed_id]["imported_count"] == 1
+    assert rows[confirmed_id]["confirmed_at"] is not None
+
+    provision(client, "historico-b", "owner-b@example.com")
+    token_b = login(client, "historico-b", "owner-b@example.com")
+    history_b = client.get(
+        "/api/v1/imports/clients",
+        headers={"Authorization": f"Bearer {token_b}"},
+    )
+    assert history_b.status_code == 200
+    assert history_b.json() == []
+
+
+def test_viewer_cannot_download_import_templates_or_read_import_history(client: TestClient):
+    provision(client, "historico-viewer", "owner@example.com")
+    owner_token = login(client, "historico-viewer", "owner@example.com")
+    create_user(client, owner_token, "consulta@example.com", "viewer")
+    viewer_token = login(client, "historico-viewer", "consulta@example.com")
+    headers = {"Authorization": f"Bearer {viewer_token}"}
+    assert client.get("/api/v1/imports/clients", headers=headers).status_code == 403
+    assert client.get("/api/v1/imports/client-template.csv", headers=headers).status_code == 403
+    assert client.get("/api/v1/imports/client-template.xlsx", headers=headers).status_code == 403
