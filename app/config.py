@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(default=60, ge=5, le=1440)
     cors_origins: list[str] = Field(default_factory=list)
     document_storage_path: str = "/var/lib/unik/uploads"
+    antivirus_host: str = "clamav"
+    antivirus_port: int = Field(default=3310, ge=1, le=65535)
+    antivirus_timeout_seconds: int = Field(default=45, ge=1, le=120)
     email_notifications_enabled: bool = False
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
