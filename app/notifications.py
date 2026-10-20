@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import smtplib
 import ssl
-from datetime import date
+from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 
 from sqlalchemy import select, func
