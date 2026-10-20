@@ -1,4 +1,5 @@
 import struct
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -66,3 +67,27 @@ def test_clamd_connection_failure_fails_closed(monkeypatch):
     monkeypatch.setattr(antivirus.socket, "create_connection", fail_connect)
     with pytest.raises(antivirus.AntivirusError):
         antivirus.scan_bytes(b"sample", "clamav", 3310, 1)
+
+
+def test_clamd_version_parser_extracts_signature_database_build_date():
+    info = antivirus.parse_clamd_version("ClamAV 1.5.1/28765/Tue Oct 20 10:30:00 2026")
+
+    assert info.engine_version == "1.5.1"
+    assert info.database_version == "28765"
+    assert info.database_date == datetime(2026, 10, 20, 10, 30, tzinfo=UTC)
+
+
+def test_clamd_version_parser_rejects_unverifiable_signature_date():
+    with pytest.raises(antivirus.AntivirusError):
+        antivirus.parse_clamd_version("ClamAV 1.5.1/28765/UNKNOWN DATE")
+
+
+def test_signature_freshness_is_strict_and_marks_old_or_future_dates_stale():
+    now = datetime(2026, 10, 20, 12, tzinfo=UTC)
+
+    assert antivirus.signature_status(now - timedelta(hours=12), now, 72) == ("healthy", None)
+    stale_status, message = antivirus.signature_status(now - timedelta(hours=73), now, 72)
+    assert stale_status == "signatures_stale"
+    assert "72 horas" in message
+    future_status, _ = antivirus.signature_status(now + timedelta(days=1), now, 72)
+    assert future_status == "signatures_stale"

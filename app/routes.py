@@ -1,7 +1,7 @@
 import hashlib
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from io import BytesIO
@@ -12,14 +12,14 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Uplo
 from fastapi.responses import Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Notification, Tenant, User, utcnow
+from app.models import AntivirusHealth, AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Notification, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
@@ -1455,6 +1455,75 @@ def _require_notification_manager(user: User) -> None:
             status_code=403,
             detail="Apenas o responsável ou administrador pode consultar e gerenciar a fila de e-mails.",
         )
+
+
+@router.get("/security/antivirus-status", tags=["Security"])
+def get_antivirus_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """Expose scanner health and quarantine counts only to office owners/admins."""
+    _require_notification_manager(current_user)
+    health = db.get(AntivirusHealth, "clamav")
+    status_value = health.status if health is not None else "unknown"
+    database_date = health.signature_database_date if health is not None else None
+    signature_age_hours = None
+    if database_date is not None:
+        current = datetime.now(UTC)
+        built = (
+            database_date.replace(tzinfo=UTC)
+            if database_date.tzinfo is None
+            else database_date.astimezone(UTC)
+        )
+        signature_age_hours = round((current - built).total_seconds() / 3600, 1)
+    pending = int(
+        db.scalar(
+            select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
+                ClientDocument.scan_status.in_(("pending", "scanning"))
+            )
+        )
+        or 0
+    )
+    failed = int(
+        db.scalar(
+            select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
+                ClientDocument.scan_status == "error",
+            )
+        )
+        or 0
+    )
+    infected_quarantine = int(
+        db.scalar(
+            select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
+                ClientDocument.scan_status == "infected",
+                ClientDocument.quarantine_purged_at.is_(None),
+            )
+        )
+        or 0
+    )
+    return {
+        "status": status_value,
+        "checked_at": health.checked_at.isoformat() if health and health.checked_at else None,
+        "last_success_at": (
+            health.last_success_at.isoformat() if health and health.last_success_at else None
+        ),
+        "signature_database_version": health.signature_database_version if health else None,
+        "signature_database_date": database_date.isoformat() if database_date else None,
+        "signature_age_hours": signature_age_hours,
+        "signature_max_age_hours": settings.antivirus_signature_max_age_hours,
+        "last_error": health.last_error if health else None,
+        "pending_documents": pending,
+        "failed_documents": failed,
+        "infected_quarantine_documents": infected_quarantine,
+        "infected_retention_days": settings.antivirus_infected_retention_days,
+        "last_quarantine_cleanup_at": (
+            health.last_cleanup_at.isoformat() if health and health.last_cleanup_at else None
+        ),
+    }
 
 
 @router.get(

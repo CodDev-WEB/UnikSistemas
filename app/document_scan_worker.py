@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.antivirus import scan_bytes
+from app.antivirus_ops import cleanup_expired_infected_documents, refresh_antivirus_health
 from app.config import Settings, get_settings
 from app.db import SessionLocal
 from app.document_storage import (
@@ -162,17 +163,41 @@ def process_pending_scans(
     return result
 
 
+def run_once(settings: Settings | None = None) -> dict:
+    """Refresh scanner health, enforce retention, and scan only with fresh signatures."""
+    active_settings = settings or get_settings()
+    with SessionLocal() as db:
+        health = refresh_antivirus_health(db, active_settings)
+        cleanup = cleanup_expired_infected_documents(db, active_settings)
+        if health["status"] == "healthy":
+            scan_stats = process_pending_scans(db, active_settings)
+        else:
+            scan_stats = {"scanned": 0, "clean": 0, "infected": 0, "failed": 0}
+    result = {
+        **scan_stats,
+        "scanner_status": health["status"],
+        "quarantine_purged": cleanup["purged"],
+        "quarantine_cleanup_failures": cleanup["failed"],
+        "infected_remaining": cleanup["remaining"],
+    }
+    logger.info("Ciclo antimalware concluído: %s", result)
+    return result
+
+
 def main() -> None:
-    logger.info("Worker antimalware iniciado; host ClamAV=%s:%s", get_settings().antivirus_host, get_settings().antivirus_port)
+    settings = get_settings()
+    logger.info(
+        "Worker antimalware iniciado; host ClamAV=%s:%s; idade máxima das assinaturas=%sh; retenção infectados=%sd",
+        settings.antivirus_host,
+        settings.antivirus_port,
+        settings.antivirus_signature_max_age_hours,
+        settings.antivirus_infected_retention_days,
+    )
     while True:
         try:
-            settings = get_settings()
-            with SessionLocal() as db:
-                stats = process_pending_scans(db, settings)
-            if any(stats.values()):
-                logger.info("Ciclo de análise documental: %s", stats)
+            run_once()
         except Exception:
-            logger.exception("Falha no ciclo de análise documental; nova tentativa no próximo ciclo")
+            logger.exception("Falha no ciclo antimalware; nova tentativa no próximo ciclo")
         time.sleep(POLL_SECONDS)
 
 

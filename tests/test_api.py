@@ -952,6 +952,149 @@ def test_scanner_errors_fail_closed_and_can_be_requeued_by_owner(client: TestCli
     assert retried.json()["scan_attempts"] == 0
 
 
+def test_antivirus_status_endpoint_is_restricted_and_scoped(client: TestClient):
+    provision(client, "antivirus-status", "owner@example.com")
+    owner_token = login(client, "antivirus-status", "owner@example.com")
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+
+    status_response = client.get("/api/v1/security/antivirus-status", headers=owner_headers)
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["status"] == "unknown"
+    assert status_response.json()["pending_documents"] == 0
+    assert status_response.json()["infected_quarantine_documents"] == 0
+
+    create_user(client, owner_token, "viewer-antivirus@example.com", "viewer")
+    viewer_token = login(client, "antivirus-status", "viewer-antivirus@example.com")
+    viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+    assert client.get("/api/v1/security/antivirus-status", headers=viewer_headers).status_code == 403
+
+
+def test_antivirus_health_alerts_once_per_transition_and_notifies_recovery(client: TestClient):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.antivirus import ClamAVInfo
+    from app.antivirus_ops import refresh_antivirus_health
+    from app.models import Notification
+
+    provision(client, "antivirus-alerts", "owner@example.com")
+    now = datetime.now(UTC)
+    stale_info = ClamAVInfo(
+        engine_version="1.5.1",
+        database_version="28765",
+        database_date=now - timedelta(days=4),
+    )
+    fresh_info = ClamAVInfo(
+        engine_version="1.5.1",
+        database_version="28766",
+        database_date=now,
+    )
+    settings = client.app.state.test_settings
+
+    with client.app.state.test_sessionmaker() as db:
+        stale = refresh_antivirus_health(
+            db,
+            settings,
+            probe=lambda *_args: stale_info,
+            now=now,
+        )
+        assert stale["status"] == "signatures_stale"
+        refresh_antivirus_health(
+            db,
+            settings,
+            probe=lambda *_args: stale_info,
+            now=now + timedelta(seconds=15),
+        )
+        alerts = db.scalars(
+            select(Notification).where(Notification.event_type == "antivirus_alert")
+        ).all()
+        assert len(alerts) == 1
+
+        recovered = refresh_antivirus_health(
+            db,
+            settings,
+            probe=lambda *_args: fresh_info,
+            now=now + timedelta(minutes=2),
+        )
+        assert recovered["status"] == "healthy"
+        events = db.scalars(
+            select(Notification).order_by(Notification.created_at.asc())
+        ).all()
+        assert [event.event_type for event in events].count("antivirus_alert") == 1
+        assert [event.event_type for event in events].count("antivirus_recovered") == 1
+
+
+def test_infected_quarantine_content_is_removed_after_retention_but_metadata_remains(client: TestClient):
+    from datetime import UTC, datetime, timedelta
+    from pathlib import Path
+
+    from sqlalchemy import update
+
+    from app.antivirus import ClamAVInfo
+    from app.antivirus_ops import cleanup_expired_infected_documents, refresh_antivirus_health
+    from app.models import ClientDocument, utcnow
+
+    provision(client, "antivirus-retention", "owner@example.com")
+    token = login(client, "antivirus-retention", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente retenção")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Arquivo infectado", "kind": "document"},
+    )
+    link = client.post(f"/api/v1/tasks/{task.json()['id']}/upload-link", headers=headers).json()
+    raw_token = link["public_path"].rsplit("/", 1)[-1]
+    upload = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("infectado.pdf", b"%PDF-1.7\\nconteudo teste", "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+    scan = _process_document_scans(
+        client,
+        scanner=lambda _content, _host, _port, _timeout: "infected",
+    )
+    assert scan["infected"] == 1
+
+    now = datetime.now(UTC)
+    with client.app.state.test_sessionmaker() as db:
+        document = db.get(ClientDocument, document_id)
+        assert document.scan_status == "infected"
+        storage_key = document.storage_key
+        db.execute(
+            update(ClientDocument)
+            .where(ClientDocument.id == document_id)
+            .values(scan_completed_at=utcnow() - timedelta(days=31))
+        )
+        db.commit()
+
+    with client.app.state.test_sessionmaker() as db:
+        info = ClamAVInfo(
+            engine_version="1.5.1",
+            database_version="28766",
+            database_date=now,
+        )
+        refresh_antivirus_health(db, client.app.state.test_settings, probe=lambda *_args: info, now=now)
+        cleaned = cleanup_expired_infected_documents(
+            db,
+            client.app.state.test_settings,
+            now=now,
+            force=True,
+        )
+        assert cleaned["purged"] == 1
+        assert cleaned["remaining"] == 0
+
+    stored_path = Path(client.app.state.test_settings.document_storage_path) / "quarantine" / storage_key
+    assert not stored_path.exists()
+    with client.app.state.test_sessionmaker() as db:
+        retained_record = db.get(ClientDocument, document_id)
+        assert retained_record is not None
+        assert retained_record.scan_status == "infected"
+        assert retained_record.quarantine_purged_at is not None
+
+
 def test_document_upload_links_and_downloads_respect_tenant_and_role(client: TestClient):
     provision(client, "documentos-tenant-a", "owner-a@example.com")
     token_a = login(client, "documentos-tenant-a", "owner-a@example.com")

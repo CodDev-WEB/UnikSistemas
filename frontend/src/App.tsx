@@ -68,7 +68,8 @@ const taskPriorityLabels: Record<ClientTask["priority"], string> = {
 };
 type TokenResponse = { access_token: string; token_type: string; expires_in: number };
 
-type NotificationEventType = "document_received" | "task_assigned" | "task_due";
+type NotificationEventType =
+  | "document_received" | "task_assigned" | "task_due" | "antivirus_alert" | "antivirus_recovered";
 type NotificationEmailStatus = {
   enabled: boolean; configured: boolean; pending: number; failed: number; note: string;
 };
@@ -88,8 +89,26 @@ const notificationEmailLabels: Record<NotificationRecord["email_status"], string
 function notificationKindLabel(kind: NotificationEventType) {
   if (kind === "document_received") return "Documento recebido";
   if (kind === "task_assigned") return "Nova atribuição";
+  if (kind === "antivirus_alert") return "Alerta antimalware";
+  if (kind === "antivirus_recovered") return "Scanner recuperado";
   return "Prazo de pendência";
 }
+
+type AntivirusStatus = {
+  status: "unknown" | "healthy" | "unavailable" | "signatures_stale";
+  checked_at: string | null; last_success_at: string | null;
+  signature_database_version: string | null; signature_database_date: string | null;
+  signature_age_hours: number | null; signature_max_age_hours: number;
+  last_error: string | null; pending_documents: number; failed_documents: number;
+  infected_quarantine_documents: number; infected_retention_days: number;
+  last_quarantine_cleanup_at: string | null;
+};
+const antivirusStatusLabels: Record<AntivirusStatus["status"], string> = {
+  unknown: "Aguardando primeira verificação",
+  healthy: "Operacional",
+  unavailable: "Indisponível",
+  signatures_stale: "Assinaturas desatualizadas",
+};
 
 
 type DocumentScanStatus = "pending" | "scanning" | "clean" | "infected" | "error";
@@ -260,6 +279,7 @@ export default function App() {
   const [tasks, setTasks] = useState<ClientTask[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [notificationEmailStatus, setNotificationEmailStatus] = useState<NotificationEmailStatus | null>(null);
+  const [antivirusStatus, setAntivirusStatus] = useState<AntivirusStatus | null>(null);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationActionBusy, setNotificationActionBusy] = useState<string | null>(null);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
@@ -354,8 +374,15 @@ export default function App() {
         } catch {
           setNotificationEmailStatus(null);
         }
+        try {
+          const status = await api<AntivirusStatus>("/api/v1/security/antivirus-status", {}, activeToken);
+          setAntivirusStatus(status);
+        } catch {
+          setAntivirusStatus(null);
+        }
       } else {
         setNotificationEmailStatus(null);
+        setAntivirusStatus(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar as notificações.");
@@ -1144,7 +1171,7 @@ export default function App() {
           ) : currentPage === "notifications" ? (
             <>
               <div className="page-heading notification-page-heading">
-                <div><div className="eyebrow">CENTRAL DE AVISOS · ESCRITÓRIO</div><h1>Notificações</h1><p>Acompanhe documentos recebidos, tarefas atribuídas e prazos próximos ou vencidos.</p></div>
+                <div><div className="eyebrow">CENTRAL DE AVISOS · ESCRITÓRIO</div><h1>Notificações</h1><p>Acompanhe documentos recebidos, tarefas atribuídas, prazos e alertas operacionais.</p></div>
                 <div className="notification-page-actions">
                   {notifications.some(item => !item.is_read) && <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleMarkAllNotificationsRead()}><CheckCheck size={15}/>{notificationActionBusy === "all" ? "Atualizando..." : "Marcar todas como lidas"}</button>}
                   <button className="icon-button" aria-label="Atualizar notificações" title="Atualizar notificações" disabled={notificationsLoading} onClick={() => void loadNotifications(token, ["owner", "admin"].includes(me.user.role))}><RefreshCw size={16}/></button>
@@ -1169,6 +1196,31 @@ export default function App() {
                   {!notificationEmailStatus?.configured && <p className="permissions-note"><LockKeyhole size={14}/> O sistema mantém os avisos na caixa interna e não envia e-mails enquanto SMTP estiver desativado.</p>}
                 </section>
               )}
+              {["owner", "admin"].includes(me.user.role) && (
+                <section className="content-card notification-email-card">
+                  <div className="card-heading">
+                    <div>
+                      <h2>Proteção antimalware</h2>
+                      <p>{antivirusStatus?.last_error || "A API consulta a disponibilidade e a data do banco de assinaturas do ClamAV antes de liberar a fila documental."}</p>
+                    </div>
+                    <div className="team-card-icon"><ShieldCheck size={18}/></div>
+                  </div>
+                  <div className="notification-email-metrics">
+                    <div><span>Estado</span><strong className={antivirusStatus?.status === "healthy" ? "notification-email-ready" : "notification-email-off"}>{antivirusStatus ? antivirusStatusLabels[antivirusStatus.status] : "Sem dados"}</strong></div>
+                    <div><span>Idade das assinaturas</span><strong>{antivirusStatus?.signature_age_hours !== null && antivirusStatus?.signature_age_hours !== undefined ? String(antivirusStatus.signature_age_hours) + " h" : "—"}</strong></div>
+                    <div><span>Aguardando análise</span><strong>{antivirusStatus?.pending_documents ?? "—"}</strong></div>
+                    <div><span>Falhas de análise</span><strong>{antivirusStatus?.failed_documents ?? "—"}</strong></div>
+                    <div><span>Infectados retidos</span><strong>{antivirusStatus?.infected_quarantine_documents ?? "—"}</strong></div>
+                  </div>
+                  <div className="notification-email-footer">
+                    <p>
+                      Limite de idade das assinaturas: {antivirusStatus?.signature_max_age_hours ?? 72} horas.
+                      Conteúdo identificado como infectado é removido após {antivirusStatus?.infected_retention_days ?? 30} dias; os metadados e o registro de auditoria são preservados.
+                    </p>
+                    <p>Última verificação: {formatDateTime(antivirusStatus?.checked_at ?? null)} · Última limpeza da quarentena: {formatDateTime(antivirusStatus?.last_quarantine_cleanup_at ?? null)}</p>
+                  </div>
+                </section>
+              )}
               <section className="content-card notification-list-card">
                 <div className="card-heading"><div><h2>Seus avisos</h2><p>{notifications.filter(item => !item.is_read).length} não lida(s) nesta lista.</p></div><span className="notification-list-count">{notifications.length} de até 100</span></div>
                 {notificationsLoading && notifications.length === 0 ? (
@@ -1180,7 +1232,7 @@ export default function App() {
                     {notifications.map(item => (
                       <article className={item.is_read ? "notification-row read" : "notification-row unread"} key={item.id}>
                         <div className={"notification-kind-icon notification-kind-" + item.event_type}>
-                          {item.event_type === "document_received" ? <FileText size={17}/> : item.event_type === "task_assigned" ? <Users size={17}/> : <CalendarDays size={17}/>}
+                          {item.event_type === "document_received" ? <FileText size={17}/> : item.event_type === "task_assigned" ? <Users size={17}/> : item.event_type === "antivirus_alert" || item.event_type === "antivirus_recovered" ? <ShieldCheck size={17}/> : <CalendarDays size={17}/>}
                         </div>
                         <div className="notification-main">
                           <div className="notification-title-line"><strong>{item.title}</strong><span className="notification-kind-label">{notificationKindLabel(item.event_type)}</span></div>

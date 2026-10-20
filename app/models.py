@@ -194,6 +194,7 @@ class ClientDocument(Base):
     scan_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     scan_last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scan_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantine_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scan_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     review_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reviewed_by_user_id: Mapped[str | None] = mapped_column(
@@ -238,3 +239,24 @@ class Notification(Base):
     email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     email_last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class AntivirusHealth(Base):
+    """Singleton state for the global ClamAV service and quarantine retention job."""
+
+    __tablename__ = "antivirus_health"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default="clamav")
+    status: Mapped[str] = mapped_column(
+        String(30), default="unknown", server_default="unknown", nullable=False
+    )
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signature_database_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    signature_database_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    incident_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_cleanup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
