@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     antivirus_infected_retention_days: int = Field(default=30, ge=1, le=365)
     antivirus_cleanup_interval_hours: int = Field(default=24, ge=1, le=168)
     email_notifications_enabled: bool = False
+    email_queue_max_age_hours: int = Field(default=24, ge=1, le=720)
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str | None = None

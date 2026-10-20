@@ -71,7 +71,8 @@ type TokenResponse = { access_token: string; token_type: string; expires_in: num
 type NotificationEventType =
   | "document_received" | "task_assigned" | "task_due" | "antivirus_alert" | "antivirus_recovered";
 type NotificationEmailStatus = {
-  enabled: boolean; configured: boolean; pending: number; failed: number; note: string;
+  enabled: boolean; configured: boolean; pending: number; failed: number;
+  expired: number; max_queue_age_hours: number; note: string;
 };
 type NotificationRecord = {
   id: string; event_type: NotificationEventType; title: string; message: string;
@@ -1187,9 +1188,10 @@ export default function App() {
                     <div><span>SMTP</span><strong className={notificationEmailStatus?.configured ? "notification-email-ready" : "notification-email-off"}>{notificationEmailStatus?.configured ? "Configurado" : "Desativado"}</strong></div>
                     <div><span>Na fila</span><strong>{notificationEmailStatus?.pending ?? "—"}</strong></div>
                     <div><span>Falhas</span><strong>{notificationEmailStatus?.failed ?? "—"}</strong></div>
+                    <div><span>Expirados</span><strong>{notificationEmailStatus?.expired ?? "—"}</strong></div>
                   </div>
                   <div className="notification-email-footer">
-                    <p>Os lembretes automáticos são gerados pelo worker. Para enviar e-mails, configure SMTP no ambiente e habilite <code>EMAIL_NOTIFICATIONS_ENABLED</code>.</p>
+                    <p>Os lembretes automáticos são gerados pelo worker. Para enviar e-mails, configure SMTP no ambiente e habilite <code>EMAIL_NOTIFICATIONS_ENABLED</code>. A fila envia automaticamente apenas mensagens com até {notificationEmailStatus?.max_queue_age_hours ?? 24} horas; mensagens antigas expiram sem envio automático e exigem reenvio explícito.</p>
                     {notificationEmailStatus?.configured && (notificationEmailStatus.failed ?? 0) > 0 && <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleRetryFailedEmails()}><Mail size={15}/>{notificationActionBusy === "retry-failed" ? "Reenfileirando..." : `Reenfileirar ${notificationEmailStatus.failed} falha(s)`}</button>}
                     <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleProcessDueReminders()}><CalendarDays size={15}/>{notificationActionBusy === "due-reminders" ? "Verificando..." : "Verificar prazos agora"}</button>
                   </div>
