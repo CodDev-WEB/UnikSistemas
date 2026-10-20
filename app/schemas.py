@@ -242,6 +242,7 @@ class ClientTaskRead(BaseModel):
 
 
 class DocumentUploadLinkRead(BaseModel):
+    id: str
     public_path: str
     expires_at: str
     max_uploads: int
