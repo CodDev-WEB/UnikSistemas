@@ -243,7 +243,11 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks" | "notifications">("dashboard");
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks" | "notifications">(() => {
+    if (window.location.pathname === "/tasks") return "tasks";
+    if (window.location.pathname === "/notifications") return "notifications";
+    return "dashboard";
+  });
   const [tasks, setTasks] = useState<ClientTask[]>([]);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [notificationEmailStatus, setNotificationEmailStatus] = useState<NotificationEmailStatus | null>(null);
