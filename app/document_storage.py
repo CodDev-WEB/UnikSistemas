@@ -54,7 +54,9 @@ def validate_uploaded_document(filename: str | None, content: bytes) -> tuple[st
             with zipfile.ZipFile(BytesIO(content)) as archive:
                 names = set(archive.namelist())
                 marker = "xl/workbook.xml" if extension == ".xlsx" else "word/document.xml"
-                valid = marker in names and not archive.testzip()
+                infos = archive.infolist()
+                total_unpacked_size = sum(item.file_size for item in infos)
+                valid = marker in names and len(infos) <= 2000 and total_unpacked_size <= 100 * 1024 * 1024
         except (zipfile.BadZipFile, OSError, RuntimeError):
             valid = False
     if not valid:
