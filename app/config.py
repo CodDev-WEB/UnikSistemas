@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./unik.db"
     bootstrap_token: str | None = None
     access_token_expire_minutes: int = Field(default=60, ge=5, le=1440)
-    cors_origins: list[str] = Field(default_factory=list)
+    cors_origins: list[str] = Field(default_factory=list)\n    document_storage_path: str = "/var/lib/unik/uploads"
     document_storage_path: str = "/var/lib/unik/uploads"
 
     @model_validator(mode="after")
