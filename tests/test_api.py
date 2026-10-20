@@ -132,7 +132,7 @@ def create_user(
         json={
             "email": email,
             "full_name": full_name,
-            "password": "Senha-Inicial-Forte-2026",
+            "password": "Senha-Forte-Teste-2026",
             "role": role,
         },
     )
@@ -177,7 +177,7 @@ def test_owner_can_create_list_update_and_deactivate_users(client: TestClient):
         json={
             "tenant_slug": "equipe-a",
             "email": "contadora@example.com",
-            "password": "Senha-Inicial-Forte-2026",
+            "password": "Senha-Forte-Teste-2026",
         },
     )
     assert denied_login.status_code == 401
@@ -198,7 +198,7 @@ def test_non_manager_cannot_manage_users_and_viewer_is_read_only(client: TestCli
         json={
             "email": "outro@example.com",
             "full_name": "Outro Usuário",
-            "password": "Senha-Inicial-Forte-2026",
+            "password": "Senha-Forte-Teste-2026",
             "role": "accountant",
         },
     ).status_code == 403
@@ -233,7 +233,7 @@ def test_admin_cannot_create_admin_change_owner_or_disable_self(client: TestClie
         json={
             "email": "admin2@example.com",
             "full_name": "Outro Admin",
-            "password": "Senha-Inicial-Forte-2026",
+            "password": "Senha-Forte-Teste-2026",
             "role": "admin",
         },
     )
