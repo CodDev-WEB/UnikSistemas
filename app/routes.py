@@ -1531,3 +1531,25 @@ def retry_notification_email(
     db.commit()
     return {"queued": True, "id": notification.id}
 
+
+
+@router.post("/notifications/retry-failed-emails", tags=["Notifications"])
+def retry_failed_notification_emails(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    _require_notification_manager(current_user)
+    if not notification_email_is_ready(settings):
+        raise HTTPException(status_code=409, detail="Configure SMTP e habilite o envio de e-mails antes de tentar novamente.")
+    failed = db.scalars(
+        select(Notification).where(
+            Notification.tenant_id == current_user.tenant_id,
+            Notification.email_status == "failed",
+        )
+    ).all()
+    for notification in failed:
+        notification.email_status = "pending"
+        notification.email_last_error = None
+    db.commit()
+    return {"queued": len(failed)}
