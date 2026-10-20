@@ -1,8 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, Check, ChevronDown,
-  CircleHelp, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus,
-  Search, Settings2, ShieldCheck, Users, UserPlus, UserCog, X,
+  CircleHelp, Clock3, Download, FileSpreadsheet, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus,
+  RefreshCw, Search, Settings2, ShieldCheck, Users, UserPlus, UserCog, X,
 } from "lucide-react";
 
 type Tenant = { id: string; name: string; slug: string; status: string };
@@ -18,11 +18,32 @@ type ImportRow = {
   tax_id: string | null; email: string | null; phone: string | null;
   status: string | null; errors: string[];
 };
+type ImportStatus = "ready" | "invalid" | "confirmed" | "discarded";
 type ImportBatch = {
-  id: string; filename: string; status: "ready" | "invalid" | "confirmed";
+  id: string; filename: string; status: ImportStatus;
   total_rows: number; imported_count: number; rows: ImportRow[];
   created_at: string | null; confirmed_at: string | null;
 };
+type ImportHistoryEntry = {
+  id: string; filename: string; status: ImportStatus; total_rows: number;
+  imported_count: number; created_by_name: string | null;
+  created_at: string | null; confirmed_at: string | null;
+};
+
+function importStatusLabel(status: ImportStatus) {
+  return {
+    ready: "Pendente de confirmação",
+    invalid: "Com pendências",
+    confirmed: "Importada",
+    discarded: "Descartada",
+  }[status];
+}
+
+function importStatusClass(status: ImportStatus) {
+  if (status === "confirmed") return "status-active";
+  if (status === "ready") return "status-pending";
+  return "status-archived";
+}
 type TokenResponse = { access_token: string; token_type: string; expires_in: number };
 
 async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -48,6 +69,14 @@ function formatDate(value: string | null) {
   return Number.isNaN(parsed.getTime()) ? "—" : new Intl.DateTimeFormat("pt-BR").format(parsed);
 }
 
+function formatDateTime(value: string | null) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(parsed);
+}
+
 export default function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("unik_access_token") ?? "");
   const [me, setMe] = useState<Me | null>(null);
@@ -56,6 +85,9 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports">("dashboard");
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBatch, setImportBatch] = useState<ImportBatch | null>(null);
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState<"csv" | "xlsx" | null>(null);
   const [loginForm, setLoginForm] = useState({ tenant_slug: "", email: "", password: "" });
   const [clientForm, setClientForm] = useState({ legal_name: "", trade_name: "", tax_id: "", email: "", phone: "" });
   const [userForm, setUserForm] = useState({ full_name: "", email: "", password: "", role: "accountant" });
@@ -70,6 +102,18 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const loadImportHistory = useCallback(async (activeToken: string) => {
+    setHistoryLoading(true);
+    try {
+      const history = await api<ImportHistoryEntry[]>("/api/v1/imports/clients?limit=50", {}, activeToken);
+      setImportHistory(history);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível carregar o histórico.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   const loadWorkspace = useCallback(async (activeToken: string) => {
     setLoading(true);
@@ -91,6 +135,7 @@ export default function App() {
       setUsers([]);
       setImportFile(null);
       setImportBatch(null);
+      setImportHistory([]);
       setCurrentPage("dashboard");
       setError(err instanceof Error ? err.message : "Sua sessão não está disponível.");
     } finally {
@@ -108,9 +153,16 @@ export default function App() {
       setUsers([]);
       setImportFile(null);
       setImportBatch(null);
+      setImportHistory([]);
       setCurrentPage("dashboard");
     }
   }, [token, loadWorkspace]);
+
+  useEffect(() => {
+    if (token && me && currentPage === "imports") {
+      void loadImportHistory(token);
+    }
+  }, [token, me, currentPage, loadImportHistory]);
 
   const filteredClients = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("pt-BR");
@@ -173,6 +225,48 @@ export default function App() {
 
 
 
+  async function handleDownloadTemplate(format: "csv" | "xlsx") {
+    if (!token) return;
+    setTemplateBusy(format);
+    setError("");
+    try {
+      const response = await fetch(`/api/v1/imports/client-template.${format}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload.detail === "string" ? payload.detail : "Não foi possível baixar o modelo.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `unik-modelo-clientes.${format}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível baixar o modelo.");
+    } finally {
+      setTemplateBusy(null);
+    }
+  }
+
+  async function handleOpenImportHistory(batchId: string) {
+    if (!token) return;
+    setError("");
+    setSuccess("");
+    try {
+      const batch = await api<ImportBatch>(`/api/v1/imports/clients/${batchId}`, {}, token);
+      setImportBatch(batch);
+      setImportFile(null);
+      setSuccess(`Detalhes do lote: ${batch.filename}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível abrir a importação.");
+    }
+  }
+
   async function handlePreviewImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token || !importFile) return;
@@ -191,6 +285,7 @@ export default function App() {
         body,
       }, token);
       setImportBatch(preview);
+      await loadImportHistory(token);
       setSuccess(preview.status === "ready"
         ? "Prévia validada. Confira os dados e confirme para gravar os clientes."
         : "A prévia encontrou pendências. Corrija o arquivo e envie novamente.");
@@ -215,6 +310,7 @@ export default function App() {
       setImportBatch(confirmed);
       const updatedClients = await api<Client[]>("/api/v1/clients?limit=100", {}, token);
       setClients(updatedClients);
+      await loadImportHistory(token);
       setSuccess(`${confirmed.imported_count} cliente(s) importado(s) com sucesso.`);
     } catch (err) {
       try {
@@ -223,6 +319,7 @@ export default function App() {
       } catch {
         // Keep the original error when the status endpoint is also unavailable.
       }
+      await loadImportHistory(token);
       setError(err instanceof Error ? err.message : "Não foi possível confirmar a importação.");
     } finally {
       setConfirmImportBusy(false);
@@ -238,7 +335,8 @@ export default function App() {
       await api<unknown>(`/api/v1/imports/clients/${importBatch.id}`, { method: "DELETE" }, token);
       setImportBatch(null);
       setImportFile(null);
-      setSuccess("Prévia descartada. Nenhum cliente foi importado.");
+      await loadImportHistory(token);
+      setSuccess("Prévia descartada. O registro foi mantido no histórico.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível descartar a prévia.");
     } finally {
@@ -297,6 +395,7 @@ export default function App() {
     setUsers([]);
     setImportFile(null);
     setImportBatch(null);
+    setImportHistory([]);
     setError("");
     setSuccess("");
     setCurrentPage("dashboard");
@@ -482,8 +581,16 @@ export default function App() {
             </>
           ) : (
             <>
-              <div className="page-heading">
-                <div><div className="eyebrow">IMPORTAÇÃO · BASE DE CLIENTES</div><h1>Importação assistida</h1><p>Valide uma planilha antes de adicionar clientes à base do escritório.</p></div>
+              <div className="page-heading import-page-heading">
+                <div><div className="eyebrow">IMPORTAÇÃO · BASE DE CLIENTES</div><h1>Importação assistida</h1><p>Baixe um modelo, preencha os dados e valide antes de importar.</p></div>
+                <div className="import-template-actions">
+                  <button className="button button-secondary" onClick={() => void handleDownloadTemplate("csv")} disabled={templateBusy !== null}>
+                    <Download size={15}/>{templateBusy === "csv" ? "Baixando..." : "Modelo CSV"}
+                  </button>
+                  <button className="button button-secondary" onClick={() => void handleDownloadTemplate("xlsx")} disabled={templateBusy !== null}>
+                    <FileSpreadsheet size={15}/>{templateBusy === "xlsx" ? "Baixando..." : "Modelo Excel"}
+                  </button>
+                </div>
               </div>
               <section className="content-card import-upload-card">
                 <div className="card-heading">
@@ -521,14 +628,14 @@ export default function App() {
                 <section className="content-card import-preview-card">
                   <div className="card-heading import-preview-heading">
                     <div>
-                      <h2>Prévia e validação</h2>
-                      <p><strong>{importBatch.filename}</strong> · {importBatch.total_rows} linha(s) analisada(s). {importBatch.status === "ready" ? "Nenhuma pendência encontrada." : importBatch.status === "confirmed" ? "Importação concluída." : "Há linhas que precisam de correção."}</p>
+                      <h2>{importBatch.status === "confirmed" ? "Importação concluída" : importBatch.status === "discarded" ? "Prévia descartada" : "Prévia e validação"}</h2>
+                      <p><strong>{importBatch.filename}</strong> · {importBatch.total_rows} linha(s) analisada(s). {importBatch.status === "ready" ? "Nenhuma pendência encontrada." : importBatch.status === "confirmed" ? "Os clientes foram importados." : importBatch.status === "discarded" ? "Nenhum cliente foi importado por este lote." : "Há linhas que precisam de correção."}</p>
                     </div>
-                    <span className={importBatch.status === "invalid" ? "status-pill status-archived" : "status-pill status-active"}>
-                      <i/>{importBatch.status === "ready" ? "Pronta para confirmar" : importBatch.status === "confirmed" ? "Confirmada" : "Com pendências"}
+                    <span className={`status-pill ${importStatusClass(importBatch.status)}`}>
+                      <i/>{importStatusLabel(importBatch.status)}
                     </span>
                   </div>
-                  {importBatch.status !== "confirmed" && <div className="import-preview-scroll">
+                  {["ready", "invalid"].includes(importBatch.status) && <div className="import-preview-scroll">
                     <table className="import-preview-table">
                       <thead><tr><th>Linha</th><th>Razão social</th><th>Nome fantasia</th><th>CNPJ/CPF</th><th>E-mail</th><th>Telefone</th><th>Situação</th><th>Validação</th></tr></thead>
                       <tbody>{importBatch.rows.map(row => (
@@ -540,15 +647,43 @@ export default function App() {
                     </table>
                   </div>}
                   <div className="import-confirm-footer">
-                    <p>{importBatch.status === "invalid" ? "Nenhum dado foi gravado. Corrija as linhas sinalizadas no arquivo original e envie novamente." : importBatch.status === "confirmed" ? `${importBatch.imported_count} cliente(s) foram adicionados à base deste escritório.` : "Confira as informações acima. Só depois de confirmar os clientes serão gravados."}</p>
-                    {importBatch.status !== "confirmed" && <div className="import-preview-actions">
+                    <p>{importBatch.status === "invalid" ? "Nenhum dado foi gravado. Corrija as linhas sinalizadas no arquivo original e envie novamente." : importBatch.status === "confirmed" ? `${importBatch.imported_count} cliente(s) foram adicionados à base deste escritório.` : importBatch.status === "discarded" ? "Esta prévia foi descartada. O registro permanece no histórico, sem os dados pessoais da planilha." : "Confira as informações acima. Só depois de confirmar os clientes serão gravados."}</p>
+                    {["ready", "invalid"].includes(importBatch.status) && <div className="import-preview-actions">
                       <button className="button button-secondary" onClick={() => void handleDiscardImport()} disabled={importBusy || confirmImportBusy}>Descartar prévia</button>
                       {importBatch.status === "ready" && <button className="button button-primary" onClick={() => void handleConfirmImport()} disabled={confirmImportBusy || importBusy}>{confirmImportBusy ? "Importando..." : `Confirmar e importar ${importBatch.total_rows} cliente(s)`} {!confirmImportBusy && <Check size={16}/>}</button>}
                     </div>}
                   </div>
                 </section>
               )}
-              <p className="permissions-note"><LockKeyhole size={14}/> Os dados são validados no servidor e vinculados ao escritório da sessão. O arquivo original não é armazenado; a prévia normalizada pode ser descartada e é apagada após a confirmação.</p>
+              <section className="content-card import-history-card">
+                <div className="card-heading">
+                  <div><h2>Histórico de importações</h2><p>Últimos 50 lotes enviados neste escritório.</p></div>
+                  <button className="icon-button" onClick={() => void loadImportHistory(token)} disabled={historyLoading} aria-label="Atualizar histórico" title="Atualizar histórico"><RefreshCw size={16}/></button>
+                </div>
+                {historyLoading && importHistory.length === 0 ? (
+                  <div className="import-history-empty"><span className="spinner"/><p>Carregando histórico...</p></div>
+                ) : importHistory.length === 0 ? (
+                  <div className="import-history-empty"><Clock3 size={24}/><strong>Nenhuma importação registrada</strong><p>Após enviar sua primeira planilha, o histórico aparecerá aqui.</p></div>
+                ) : (
+                  <div className="import-history-scroll">
+                    <table className="import-history-table">
+                      <thead><tr><th>ARQUIVO</th><th>DATA</th><th>ENVIADO POR</th><th>LINHAS</th><th>IMPORTADOS</th><th>SITUAÇÃO</th><th/></tr></thead>
+                      <tbody>{importHistory.map(entry => (
+                        <tr key={entry.id}>
+                          <td><div className="import-history-file"><FileText size={15}/><span>{entry.filename}</span></div></td>
+                          <td>{formatDateTime(entry.created_at)}</td>
+                          <td>{entry.created_by_name || "Usuário removido"}</td>
+                          <td>{entry.total_rows}</td>
+                          <td><strong>{entry.imported_count}</strong></td>
+                          <td><span className={`status-pill ${importStatusClass(entry.status)}`}><i/>{importStatusLabel(entry.status)}</span></td>
+                          <td>{["ready", "invalid"].includes(entry.status) && <button className="text-button" onClick={() => void handleOpenImportHistory(entry.id)}>Ver prévia <ArrowRight size={14}/></button>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+              <p className="permissions-note"><LockKeyhole size={14}/> O histórico é restrito ao escritório autenticado. O arquivo original não é armazenado; prévias pendentes podem ser descartadas, e seu conteúdo é removido após confirmação ou descarte.</p>
             </>
           )}
           <footer className="page-footer"><span>© 2026 UnikSistemas</span><span>GESTÃO CONTÁBIL · VERSÃO 0.1.0</span></footer>
