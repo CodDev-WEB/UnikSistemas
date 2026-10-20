@@ -89,10 +89,12 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 
 - E-mails automáticos enviados aos clientes, convites por e-mail, recuperação de senha e MFA.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
-- Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
+- Observabilidade avançada, alertas operacionais e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 
-O perfil de produção também exige PostgreSQL via `postgresql+psycopg` e senha de banco com ao menos 24 caracteres; as rotas de documentação OpenAPI são desativadas nesse perfil. O Nginx aplica cabeçalhos básicos de proteção no navegador, mas o proxy de borda ainda deve terminar TLS/HTTPS e aplicar HSTS.\n\nNão exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
+O perfil de produção também exige PostgreSQL via `postgresql+psycopg` e senha de banco com ao menos 24 caracteres; as rotas de documentação OpenAPI são desativadas nesse perfil. O Nginx aplica cabeçalhos básicos de proteção no navegador e limites de requisição para login (5/min, burst 4), provisionamento (2/min, burst 1), consulta pública de links (30/min, burst 10) e envio de arquivos (6/min, burst 2). Esses limites são aplicados na borda Nginx e usam `X-Real-IP` quando informado; o proxy HTTPS externo deve **sobrescrever** esse cabeçalho com o IP real do cliente, nunca confiar no valor enviado pelo próprio cliente. Se o proxy não estiver configurado para isso, os limites podem compartilhar o mesmo bucket entre usuários. Não exponha a API diretamente e não publique o serviço frontend fora do proxy confiável. O proxy de borda ainda deve terminar TLS/HTTPS e aplicar HSTS.
+
+Não exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
 
 ## Importação assistida de clientes
 

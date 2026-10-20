@@ -7,6 +7,8 @@ COPY src ./src
 RUN npm run build
 
 FROM nginx:1.27-alpine
+RUN mkdir -p /etc/nginx/snippets
+COPY snippets/api-proxy.conf /etc/nginx/snippets/api-proxy.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /web/dist /usr/share/nginx/html
 EXPOSE 80
