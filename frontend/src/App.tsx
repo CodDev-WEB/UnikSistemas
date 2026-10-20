@@ -330,7 +330,7 @@ export default function App() {
               </section>
               <section className="next-step-card"><div className="next-step-icon"><Activity size={20}/></div><div><span className="next-step-label">PRÓXIMA ETAPA</span><h3>Organize a base de atendimento</h3><p>Cadastre as empresas atendidas pelo escritório. Importações e acompanhamento de pendências serão adicionados nas próximas entregas.</p></div><button className="button button-secondary" onClick={() => setCurrentPage("clients")}>Abrir clientes <ArrowRight size={16}/></button></section>
             </>
-          ) : (
+          ) : currentPage === "clients" ? (
             <>
               <div className="page-heading">
                 <div><div className="eyebrow">CADASTROS · BASE DE ATENDIMENTO</div><h1>Clientes</h1><p>Gerencie as empresas atendidas pelo seu escritório.</p></div>
