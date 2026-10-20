@@ -1002,6 +1002,9 @@ def _serialize_document_record(record) -> dict:
         "content_type": document.content_type,
         "file_size": document.file_size,
         "sha256": document.sha256,
+        "scan_status": document.scan_status,
+        "scan_attempts": document.scan_attempts,
+        "scan_completed_at": document.scan_completed_at.isoformat() if document.scan_completed_at else None,
         "review_status": document.review_status,
         "review_note": document.review_note,
         "reviewed_by_name": reviewed_by_name,
@@ -1190,6 +1193,7 @@ async def upload_public_document(
         file_size=len(content),
         sha256=hashlib.sha256(content).hexdigest(),
         review_status="pending",
+        scan_status="pending",
     )
     link.upload_count += 1
     if task.status == "open":
@@ -1246,6 +1250,7 @@ async def upload_public_document(
         "filename": document.original_filename,
         "file_size": document.file_size,
         "review_status": document.review_status,
+        "scan_status": document.scan_status,
     }
 
 
@@ -1294,8 +1299,13 @@ def download_client_document(
     )
     if document is None:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    if document.scan_status != "clean":
+        raise HTTPException(
+            status_code=423,
+            detail="O documento permanece em quarentena até a verificação antimalware ser aprovada.",
+        )
     try:
-        content = load_document(settings.document_storage_path, document.storage_key)
+        content = load_document(settings.document_storage_path, document.storage_key, area="clean")
     except (FileNotFoundError, OSError):
         raise HTTPException(status_code=404, detail="O arquivo não está disponível no armazenamento.") from None
 
@@ -1343,6 +1353,11 @@ def review_client_document(
     )
     if document is None:
         raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    if document.scan_status != "clean":
+        raise HTTPException(
+            status_code=409,
+            detail="A conferência manual só fica disponível após a análise antimalware aprovada.",
+        )
     document.review_status = payload.review_status
     document.review_note = payload.review_note
     document.reviewed_by_user_id = current_user.id
@@ -1355,6 +1370,56 @@ def review_client_document(
             entity_type="client_document",
             entity_id=document.id,
             details={"review_status": document.review_status},
+        )
+    )
+    db.commit()
+    record = db.execute(
+        _document_snapshot_query().where(
+            ClientDocument.id == document.id,
+            ClientDocument.tenant_id == current_user.tenant_id,
+        )
+    ).one()
+    return _serialize_document_record(record)
+
+
+@router.post(
+    "/documents/{document_id}/retry-scan",
+    response_model=ClientDocumentRead,
+    tags=["Documents"],
+)
+def retry_document_scan(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Somente o responsável ou administrador pode reenfileirar a análise.")
+    document = db.scalar(
+        select(ClientDocument).where(
+            ClientDocument.id == document_id,
+            ClientDocument.tenant_id == current_user.tenant_id,
+        )
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    if document.scan_status != "error":
+        raise HTTPException(
+            status_code=409,
+            detail="Somente documentos cuja análise falhou podem ser reenfileirados.",
+        )
+    document.scan_status = "pending"
+    document.scan_attempts = 0
+    document.scan_last_attempt_at = None
+    document.scan_completed_at = None
+    document.scan_error = None
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="document.scan_retry_requested",
+            entity_type="client_document",
+            entity_id=document.id,
+            details={},
         )
     )
     db.commit()
