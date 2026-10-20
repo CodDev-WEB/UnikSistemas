@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, Check, ChevronDown,
-  CircleHelp, Clock3, Download, FileSpreadsheet, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus,
+  CircleHelp, Clock3, Download, FileSpreadsheet, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus, Mail, CheckCheck, AlertCircle,
   RefreshCw, Search, Settings2, ShieldCheck, Users, UserPlus, UserCog, ClipboardList, CalendarDays, X,
 } from "lucide-react";
 
@@ -66,7 +66,30 @@ const taskKindLabels: Record<ClientTask["kind"], string> = {
 const taskPriorityLabels: Record<ClientTask["priority"], string> = {
   low: "Baixa", normal: "Normal", high: "Alta",
 };
-type TokenResponse = { access_token: string; token_type: string; expires_in: number };
+type TokenResponse = { access_token: string; token_type: string; expires_in: number };\n
+type NotificationEventType = "document_received" | "task_assigned" | "task_due";
+type NotificationEmailStatus = {
+  enabled: boolean; configured: boolean; pending: number; failed: number; note: string;
+};
+type NotificationRecord = {
+  id: string; event_type: NotificationEventType; title: string; message: string;
+  entity_type: string; entity_id: string; action_url: string | null; is_read: boolean;
+  email_status: "pending" | "sent" | "failed"; email_attempts: number;
+  email_sent_at: string | null; created_at: string | null;
+};
+type DueReminderResult = {
+  created: number; due_items_checked: number; email_enabled: boolean;
+  queued_email_count: number; failed_email_count: number;
+};
+const notificationEmailLabels: Record<NotificationRecord["email_status"], string> = {
+  pending: "Na fila de e-mail", sent: "E-mail enviado", failed: "Falha no e-mail",
+};
+function notificationKindLabel(kind: NotificationEventType) {
+  if (kind === "document_received") return "Documento recebido";
+  if (kind === "task_assigned") return "Nova atribuição";
+  return "Prazo de pendência";
+}
+
 
 type ClientDocument = {
   id: string; task_id: string; task_title: string; client_name: string;
@@ -219,8 +242,8 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks">("dashboard");
-  const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks" | "notifications">("dashboard");
+  const [tasks, setTasks] = useState<ClientTask[]>([]);\n  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);\n  const [notificationEmailStatus, setNotificationEmailStatus] = useState<NotificationEmailStatus | null>(null);\n  const [notificationsLoading, setNotificationsLoading] = useState(false);\n  const [notificationActionBusy, setNotificationActionBusy] = useState<string | null>(null);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [taskUploadLinks, setTaskUploadLinks] = useState<Record<string, ActiveUploadLink>>({});
   const [taskLinkBusy, setTaskLinkBusy] = useState<string | null>(null);
@@ -282,6 +305,29 @@ export default function App() {
       setTasksLoading(false);
     }
   }, []);
+
+  const loadNotifications = useCallback(async (activeToken: string, canManageEmail: boolean) => {
+    setNotificationsLoading(true);
+    try {
+      const rows = await api<NotificationRecord[]>("/api/v1/notifications?limit=100", {}, activeToken);
+      setNotifications(rows);
+      if (canManageEmail) {
+        try {
+          const status = await api<NotificationEmailStatus>("/api/v1/notifications/email-status", {}, activeToken);
+          setNotificationEmailStatus(status);
+        } catch {
+          setNotificationEmailStatus(null);
+        }
+      } else {
+        setNotificationEmailStatus(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível carregar as notificações.");
+    } finally {
+      setNotificationsLoading(false);
+    }
+  }, []);
+
 
   const loadWorkspace = useCallback(async (activeToken: string) => {
     setLoading(true);
@@ -573,6 +619,79 @@ export default function App() {
     }
   }
 
+
+  async function handleMarkNotificationRead(notificationId: string) {
+    if (!token) return;
+    setNotificationActionBusy(notificationId);
+    try {
+      const updated = await api<NotificationRecord>("/api/v1/notifications/" + notificationId + "/read", {
+        method: "PATCH",
+      }, token);
+      setNotifications(previous => previous.map(item => item.id === updated.id ? updated : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível marcar a notificação como lida.");
+    } finally {
+      setNotificationActionBusy(null);
+    }
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    if (!token) return;
+    setNotificationActionBusy("all");
+    try {
+      await api<{ marked_read: number }>("/api/v1/notifications/read-all", { method: "POST" }, token);
+      setNotifications(previous => previous.map(item => ({ ...item, is_read: true })));
+      setSuccess("Todas as notificações foram marcadas como lidas.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar as notificações.");
+    } finally {
+      setNotificationActionBusy(null);
+    }
+  }
+
+  async function handleProcessDueReminders() {
+    if (!token) return;
+    setNotificationActionBusy("due-reminders");
+    setError("");
+    try {
+      const result = await api<DueReminderResult>("/api/v1/notifications/process-due-reminders", {
+        method: "POST",
+      }, token);
+      await loadNotifications(token, ["owner", "admin"].includes(me?.user.role ?? ""));
+      setSuccess(
+        result.created
+          ? `${result.created} alerta(s) de prazo criado(s); ${result.due_items_checked} pendência(s) verificadas.`
+          : `Verificação concluída: ${result.due_items_checked} pendência(s), sem novos alertas hoje.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível verificar os prazos.");
+    } finally {
+      setNotificationActionBusy(null);
+    }
+  }
+
+  async function handleRetryNotificationEmail(notificationId: string) {
+    if (!token) return;
+    setNotificationActionBusy(notificationId);
+    setError("");
+    try {
+      await api<{ queued: boolean }>("/api/v1/notifications/" + notificationId + "/retry-email", {
+        method: "POST",
+      }, token);
+      await loadNotifications(token, ["owner", "admin"].includes(me?.user.role ?? ""));
+      setSuccess("E-mail recolocado na fila de envio.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível reenfileirar o e-mail.");
+    } finally {
+      setNotificationActionBusy(null);
+    }
+  }
+
+  async function handleOpenNotification(item: NotificationRecord) {
+    if (!item.is_read) await handleMarkNotificationRead(item.id);
+    if (item.action_url === "/tasks") setCurrentPage("tasks");
+  }
+
   async function handleDownloadTemplate(format: "csv" | "xlsx") {
     if (!token) return;
     setTemplateBusy(format);
@@ -845,7 +964,7 @@ export default function App() {
           <button className={currentPage === "clients" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("clients")}><Users size={18} /><span>Clientes</span><span className="nav-count">{clients.length}</span></button>
           {canManageUsers && <button className={currentPage === "users" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("users")}><UserCog size={18} /><span>Equipe e acessos</span><span className="nav-count">{users.length}</span></button>}
           {canImportClients && <button className={currentPage === "imports" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("imports")}><ArrowDownToLine size={18} /><span>Importações</span></button>}
-          <button className={currentPage === "tasks" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("tasks")}><ClipboardList size={18}/><span>Pendências e documentos</span><span className="nav-count">{tasks.filter(task => ["open", "received"].includes(task.status)).length}</span></button>
+          <button className={currentPage === "tasks" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("tasks")}><ClipboardList size={18}/><span>Pendências e documentos</span><span className="nav-count">{tasks.filter(task => ["open", "received"].includes(task.status)).length}</span></button>\n          <button className={currentPage === "notifications" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("notifications")}><Bell size={18}/><span>Notificações</span>{notifications.filter(item => !item.is_read).length > 0 && <span className="nav-count">{Math.min(notifications.filter(item => !item.is_read).length, 99)}</span>}</button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note"><div className="note-icon"><ShieldCheck size={16} /></div><div><strong>Seu espaço, seus dados</strong><p>O acesso é restrito ao escritório autenticado.</p></div></div>
@@ -859,8 +978,8 @@ export default function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : currentPage === "imports" ? "Importações" : currentPage === "tasks" ? "Pendências e documentos" : "Equipe"}</strong></div>
-          <div className="topbar-actions"><span className="environment-tag"><i /> Ambiente de trabalho</span><button className="icon-button" type="button" title="Ajuda" onClick={() => setSuccess("Consulte a documentação da API em /docs no ambiente local.")}><CircleHelp size={18} /></button><button className="icon-button" type="button" title="Notificações — em breve" disabled><Bell size={18} /></button><div className="topbar-avatar">{initials(me.user.full_name)}</div></div>
+          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : currentPage === "imports" ? "Importações" : currentPage === "tasks" ? "Pendências e documentos" : currentPage === "notifications" ? "Notificações" : "Equipe"}</strong></div>
+          <div className="topbar-actions"><span className="environment-tag"><i /> Ambiente de trabalho</span><button className="icon-button" type="button" title="Ajuda" onClick={() => setSuccess("Consulte a documentação da API em /docs no ambiente local.")}><CircleHelp size={18} /></button><button className="icon-button notification-bell-button" type="button" title="Abrir notificações" onClick={() => setCurrentPage("notifications")} aria-label={notifications.filter(item => !item.is_read).length ? `Notificações (${notifications.filter(item => !item.is_read).length} não lidas)` : "Notificações"}><Bell size={18} />{notifications.filter(item => !item.is_read).length > 0 && <span className="notification-bell-count">{Math.min(notifications.filter(item => !item.is_read).length, 99)}</span>}</button><div className="topbar-avatar">{initials(me.user.full_name)}</div></div>
         </header>
         <div className="page-content">
           {error && <div className="alert alert-error page-alert" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Fechar mensagem"><X size={16}/></button></div>}
@@ -935,6 +1054,65 @@ export default function App() {
                 })}</div>}
               </section>
               <p className="permissions-note"><LockKeyhole size={14}/> As permissões são verificadas pela API. Alterar a interface não concede acesso adicional; operações fora do perfil são recusadas pelo servidor.</p>
+            </>
+
+          ) : currentPage === "notifications" ? (
+            <>
+              <div className="page-heading notification-page-heading">
+                <div><div className="eyebrow">CENTRAL DE AVISOS · ESCRITÓRIO</div><h1>Notificações</h1><p>Acompanhe documentos recebidos, tarefas atribuídas e prazos próximos ou vencidos.</p></div>
+                <div className="notification-page-actions">
+                  {notifications.some(item => !item.is_read) && <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleMarkAllNotificationsRead()}><CheckCheck size={15}/>{notificationActionBusy === "all" ? "Atualizando..." : "Marcar todas como lidas"}</button>}
+                  <button className="icon-button" aria-label="Atualizar notificações" title="Atualizar notificações" disabled={notificationsLoading} onClick={() => void loadNotifications(token, ["owner", "admin"].includes(me.user.role))}><RefreshCw size={16}/></button>
+                </div>
+              </div>
+              {["owner", "admin"].includes(me.user.role) && (
+                <section className="content-card notification-email-card">
+                  <div className="card-heading">
+                    <div><h2>Alertas por e-mail</h2><p>{notificationEmailStatus?.note || "Consultando a configuração do envio..."}</p></div>
+                    <div className="team-card-icon"><Mail size={18}/></div>
+                  </div>
+                  <div className="notification-email-metrics">
+                    <div><span>SMTP</span><strong className={notificationEmailStatus?.configured ? "notification-email-ready" : "notification-email-off"}>{notificationEmailStatus?.configured ? "Configurado" : "Desativado"}</strong></div>
+                    <div><span>Na fila</span><strong>{notificationEmailStatus?.pending ?? "—"}</strong></div>
+                    <div><span>Falhas</span><strong>{notificationEmailStatus?.failed ?? "—"}</strong></div>
+                  </div>
+                  <div className="notification-email-footer">
+                    <p>Os lembretes automáticos são gerados pelo worker. Para enviar e-mails, configure SMTP no ambiente e habilite <code>EMAIL_NOTIFICATIONS_ENABLED</code>.</p>
+                    <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleProcessDueReminders()}><CalendarDays size={15}/>{notificationActionBusy === "due-reminders" ? "Verificando..." : "Verificar prazos agora"}</button>
+                  </div>
+                  {!notificationEmailStatus?.configured && <p className="permissions-note"><LockKeyhole size={14}/> O sistema mantém os avisos na caixa interna e não envia e-mails enquanto SMTP estiver desativado.</p>}
+                </section>
+              )}
+              <section className="content-card notification-list-card">
+                <div className="card-heading"><div><h2>Seus avisos</h2><p>{notifications.filter(item => !item.is_read).length} não lida(s) nesta lista.</p></div><span className="notification-list-count">{notifications.length} de até 100</span></div>
+                {notificationsLoading && notifications.length === 0 ? (
+                  <div className="loading-state"><div className="spinner"/><span>Carregando notificações...</span></div>
+                ) : notifications.length === 0 ? (
+                  <div className="import-history-empty"><Bell size={24}/><strong>Nenhuma notificação por enquanto</strong><p>Novas atribuições, documentos recebidos e lembretes de prazo aparecerão aqui.</p></div>
+                ) : (
+                  <div className="notification-list">
+                    {notifications.map(item => (
+                      <article className={item.is_read ? "notification-row read" : "notification-row unread"} key={item.id}>
+                        <div className={"notification-kind-icon notification-kind-" + item.event_type}>
+                          {item.event_type === "document_received" ? <FileText size={17}/> : item.event_type === "task_assigned" ? <Users size={17}/> : <CalendarDays size={17}/>}
+                        </div>
+                        <div className="notification-main">
+                          <div className="notification-title-line"><strong>{item.title}</strong><span className="notification-kind-label">{notificationKindLabel(item.event_type)}</span></div>
+                          <p>{item.message}</p>
+                          <div className="notification-meta"><span>{formatDateTime(item.created_at)}</span><span className={"notification-email-status email-" + item.email_status}>{notificationEmailLabels[item.email_status]}</span></div>
+                        </div>
+                        <div className="notification-actions">
+                          {item.action_url && <button className="button button-secondary notification-action-button" onClick={() => void handleOpenNotification(item)}>{item.is_read ? "Abrir pendências" : "Ver aviso"} <ArrowRight size={13}/></button>}
+                          {!item.is_read && <button className="icon-button" title="Marcar como lida" aria-label="Marcar como lida" disabled={notificationActionBusy !== null} onClick={() => void handleMarkNotificationRead(item.id)}><Check size={15}/></button>}
+                          {["owner", "admin"].includes(me.user.role) && item.email_status === "failed" && <button className="text-button notification-retry-button" disabled={notificationActionBusy !== null} onClick={() => void handleRetryNotificationEmail(item.id)}>{notificationActionBusy === item.id ? "Reenfileirando..." : "Tentar novamente"}</button>}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+                <div className="table-footer"><span>Dados restritos ao usuário autenticado</span><span>Últimas 100 notificações</span></div>
+              </section>
+              <p className="permissions-note"><ShieldCheck size={14}/> Cada usuário vê apenas as próprias notificações. Falhas de entrega não removem o aviso interno; um administrador pode reenfileirar e-mails após corrigir a configuração SMTP.</p>
             </>
           ) : currentPage === "tasks" ? (
             <>
