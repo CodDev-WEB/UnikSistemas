@@ -47,8 +47,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "Parando gravações da aplicação para obter um backup consistente..."
-docker compose stop "${SERVICES[@]}"
 STOPPED=1
+docker compose stop "${SERVICES[@]}"
 
 docker compose exec -T db sh -ec '
   pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null
