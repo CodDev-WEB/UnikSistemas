@@ -2,6 +2,7 @@ import hashlib
 import re
 import secrets
 from datetime import timedelta
+
 from io import BytesIO
 from pathlib import PurePosixPath
 from urllib.parse import quote
@@ -17,9 +18,7 @@ from sqlalchemy.orm import Session, aliased
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import (
-    AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow,
-)
+from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
@@ -489,7 +488,50 @@ def download_client_import_csv_template(
 ):
     """Download a minimal CSV template for client imports."""
     _require_client_editor(current_user)
-    content = "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status" + chr(13) + chr(10)
+    content = (
+        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
+    )
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="unik-modelo-clientes.csv"'},
+    )
+
+
+@router.get("/imports/client-template.xlsx", tags=["Imports"])
+def download_client_import_xlsx_template(
+    current_user: User = Depends(get_current_user),
+):
+    """Download an Excel template with a clients tab and usage instructions."""
+    _require_client_editor(current_user)
+    workbook = Workbook()
+    clients_sheet = workbook.active
+    clients_sheet.title = "Clientes"
+    headers = ["Razão Social", "Nome Fantasia", "CNPJ/CPF", "E-mail", "Telefone", "Status"]
+    clients_sheet.append(headers)
+    clients_sheet.freeze_panes = "A2"
+    clients_sheet.auto_filter.ref = "A1:F1"
+    widths = {"A": 34, "B": 28, "C": 20, "D": 32, "E": 20, "F": 16}
+    for column, width in widths.items():
+        clients_sheet.column_dimensions[column].width = width
+    for cell in clients_sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="5C55B7")
+    for row_number in range(2, 1002):
+        clients_sheet.cell(row=row_number, column=3).number_format = "@"
+
+    instructions = workbook.create_sheet("Instruções")
+    instructions.append(["Como usar o modelo de clientes"])
+    instructions.append(["1. Preencha uma linha para cada cliente na aba Clientes."])
+    instructions.append(["2. Razão Social é obrigatória; mantenha a primeira linha de títulos."])
+    instructions.append(["3. CNPJ/CPF deve ser formatado como texto para preservar zeros à esquerda."])
+    instructions.append(["4. Status aceita Ativo ou Arquivado; se vazio, será considerado Ativo."])
+    instructions.append(["5. Salve como .xlsx e envie pelo menu Importações para revisar a prévia."])
+    instructions.column_dimensions["A"].width = 105
+    instructions["A1"].font = Font(bold=True, size=14)
+    workbook_buffer = BytesIO()
+    workbook.save(workbook_buffer)
+    workbook.close()
     return Response(
         content=workbook_buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1118,21 +1160,23 @@ async def upload_public_document(
         task.status = "received"
     task.updated_at = utcnow()
     db.add(document)
-    db.add(
-        AuditLog(
-            tenant_id=link.tenant_id,
-            actor_user_id=None,
-            action="document.uploaded",
-            entity_type="client_document",
-            entity_id=document.id,
-            details={
-                "task_id": task.id,
-                "file_size": len(content),
-                "content_type": content_type,
-            },
-        )
-    )
     try:
+        # Assign the ORM-generated document ID before writing the audit event.
+        db.flush()
+        db.add(
+            AuditLog(
+                tenant_id=link.tenant_id,
+                actor_user_id=None,
+                action="document.uploaded",
+                entity_type="client_document",
+                entity_id=document.id,
+                details={
+                    "task_id": task.id,
+                    "file_size": len(content),
+                    "content_type": content_type,
+                },
+            )
+        )
         db.commit()
         db.refresh(document)
     except Exception:
