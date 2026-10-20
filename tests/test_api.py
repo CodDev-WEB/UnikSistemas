@@ -893,3 +893,121 @@ def test_document_upload_links_and_downloads_respect_tenant_and_role(client: Tes
     )
     assert revoked.status_code == 204
     assert client.get(f"/api/v1/public/document-upload/{second_token}").status_code == 404
+
+
+def test_notifications_are_private_to_user_and_tenant(client: TestClient):
+    provision(client, "notificacoes-a", "owner-a@example.com")
+    owner_token = login(client, "notificacoes-a", "owner-a@example.com")
+    owner_headers = {"Authorization": f"Bearer {owner_token}"}
+    company = create_client_record(client, owner_token, "Cliente de Notificações")
+    teammate = create_user(
+        client, owner_token, "assistente-notificacao@example.com", "assistant", "Assistente de Notificações"
+    )
+    created_task = client.post(
+        "/api/v1/tasks",
+        headers=owner_headers,
+        json={
+            "client_id": company["id"],
+            "title": "Conferir balancete",
+            "kind": "routine",
+            "due_date": "2027-01-15",
+            "assigned_to_user_id": teammate["id"],
+        },
+    )
+    assert created_task.status_code == 201, created_task.text
+
+    teammate_token = login(client, "notificacoes-a", "assistente-notificacao@example.com")
+    teammate_headers = {"Authorization": f"Bearer {teammate_token}"}
+    notices = client.get("/api/v1/notifications?unread_only=true", headers=teammate_headers)
+    assert notices.status_code == 200, notices.text
+    assignment = next(item for item in notices.json() if item["event_type"] == "task_assigned")
+    assert assignment["title"] == "Nova pendência atribuída"
+    assert assignment["is_read"] is False
+    assert assignment["email_status"] == "pending"
+
+    assert client.get("/api/v1/notifications", headers=owner_headers).json() == []
+    owner_status = client.get("/api/v1/notifications/email-status", headers=owner_headers)
+    assert owner_status.status_code == 200
+    assert owner_status.json()["enabled"] is False
+    assert owner_status.json()["configured"] is False
+
+    read = client.patch(
+        f"/api/v1/notifications/{assignment['id']}/read",
+        headers=teammate_headers,
+    )
+    assert read.status_code == 200
+    assert read.json()["is_read"] is True
+    assert client.patch(
+        f"/api/v1/notifications/{assignment['id']}/read",
+        headers=owner_headers,
+    ).status_code == 404
+
+    create_user(client, owner_token, "consulta-notificacoes@example.com", "viewer", "Consulta")
+    viewer_token = login(client, "notificacoes-a", "consulta-notificacoes@example.com")
+    assert client.get(
+        "/api/v1/notifications/email-status",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    ).status_code == 403
+
+    provision(client, "notificacoes-b", "owner-b@example.com")
+    other_token = login(client, "notificacoes-b", "owner-b@example.com")
+    other_headers = {"Authorization": f"Bearer {other_token}"}
+    assert client.get("/api/v1/notifications", headers=other_headers).json() == []
+    assert client.patch(
+        f"/api/v1/notifications/{assignment['id']}/read",
+        headers=other_headers,
+    ).status_code == 404
+
+
+def test_due_reminders_are_idempotent_and_only_cover_open_work(client: TestClient):
+    provision(client, "lembretes-prazos", "owner@example.com")
+    token = login(client, "lembretes-prazos", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente com Prazo")
+
+    overdue = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={
+            "client_id": company["id"],
+            "title": "Entregar documentos fiscais",
+            "kind": "document",
+            "due_date": "2020-01-01",
+        },
+    )
+    assert overdue.status_code == 201, overdue.text
+
+    completed = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={
+            "client_id": company["id"],
+            "title": "Rotina já concluída",
+            "kind": "routine",
+            "due_date": "2020-01-01",
+        },
+    )
+    assert completed.status_code == 201, completed.text
+    client.patch(
+        f"/api/v1/tasks/{completed.json()['id']}",
+        headers=headers,
+        json={"status": "completed"},
+    )
+
+    first = client.post("/api/v1/notifications/process-due-reminders", headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["created"] == 1
+    assert first.json()["due_items_checked"] == 1
+    assert first.json()["email_enabled"] is False
+
+    second = client.post("/api/v1/notifications/process-due-reminders", headers=headers)
+    assert second.status_code == 200, second.text
+    assert second.json()["created"] == 0
+
+    reminders = [
+        item for item in client.get("/api/v1/notifications", headers=headers).json()
+        if item["event_type"] == "task_due"
+    ]
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "Pendência vencida"
+    assert "Entregar documentos fiscais" in reminders[0]["message"]
