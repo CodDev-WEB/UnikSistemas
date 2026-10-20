@@ -183,6 +183,13 @@ export default function App() {
       setImportBatch(null);
       setImportHistory([]);
       setTasks([]);
+      setShowTaskForm(false);
+      setTaskForm({
+    client_id: "", title: "", description: "", kind: "document",
+    priority: "normal", due_date: "", assigned_to_user_id: "",
+  });
+      setTaskClientFilter("all");
+      setTaskSearch("");
       setCurrentPage("dashboard");
       setError(err instanceof Error ? err.message : "Sua sessão não está disponível.");
     } finally {
@@ -202,6 +209,13 @@ export default function App() {
       setImportBatch(null);
       setImportHistory([]);
       setTasks([]);
+      setShowTaskForm(false);
+      setTaskForm({
+    client_id: "", title: "", description: "", kind: "document",
+    priority: "normal", due_date: "", assigned_to_user_id: "",
+  });
+      setTaskClientFilter("all");
+      setTaskSearch("");
       setCurrentPage("dashboard");
     }
   }, [token, loadWorkspace]);
@@ -514,6 +528,13 @@ export default function App() {
     setImportBatch(null);
     setImportHistory([]);
     setTasks([]);
+    setShowTaskForm(false);
+    setTaskForm({
+    client_id: "", title: "", description: "", kind: "document",
+    priority: "normal", due_date: "", assigned_to_user_id: "",
+  });
+    setTaskClientFilter("all");
+    setTaskSearch("");
     setError("");
     setSuccess("");
     setCurrentPage("dashboard");
