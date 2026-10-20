@@ -1118,21 +1118,23 @@ async def upload_public_document(
         task.status = "received"
     task.updated_at = utcnow()
     db.add(document)
-    db.add(
-        AuditLog(
-            tenant_id=link.tenant_id,
-            actor_user_id=None,
-            action="document.uploaded",
-            entity_type="client_document",
-            entity_id=document.id,
-            details={
-                "task_id": task.id,
-                "file_size": len(content),
-                "content_type": content_type,
-            },
-        )
-    )
     try:
+        # Assign the ORM-generated document ID before writing the audit event.
+        db.flush()
+        db.add(
+            AuditLog(
+                tenant_id=link.tenant_id,
+                actor_user_id=None,
+                action="document.uploaded",
+                entity_type="client_document",
+                entity_id=document.id,
+                details={
+                    "task_id": task.id,
+                    "file_size": len(content),
+                    "content_type": content_type,
+                },
+            )
+        )
         db.commit()
         db.refresh(document)
     except Exception:
