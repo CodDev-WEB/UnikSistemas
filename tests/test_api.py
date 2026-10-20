@@ -490,7 +490,7 @@ def test_client_import_templates_require_auth_and_have_expected_headers(client: 
 
     xlsx_template = client.get("/api/v1/imports/client-template.xlsx", headers=headers)
     assert xlsx_template.status_code == 200
-    workbook = load_workbook(BytesIO(xlsx_template.content), read_only=True, data_only=True)
+    workbook = load_workbook(BytesIO(xlsx_template.content), data_only=True)
     assert workbook.sheetnames == ["Clientes", "Instruções"]
     sheet = workbook["Clientes"]
     assert [cell.value for cell in sheet[1]] == csv_headers
