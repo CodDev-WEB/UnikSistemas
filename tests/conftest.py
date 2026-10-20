@@ -12,7 +12,7 @@ from app.main import app
 
 
 @pytest.fixture()
-def client() -> Generator[TestClient, None, None]:
+def client(tmp_path) -> Generator[TestClient, None, None]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -27,6 +27,7 @@ def client() -> Generator[TestClient, None, None]:
         bootstrap_token="test-bootstrap-token-with-more-than-thirty-two",
         access_token_expire_minutes=30,
         cors_origins=[],
+        document_storage_path=str(tmp_path / "uploads"),
     )
 
     def override_get_db():

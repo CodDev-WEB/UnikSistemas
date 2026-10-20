@@ -1,7 +1,10 @@
+import hashlib
+import re
 import secrets
-
+from datetime import timedelta
 from io import BytesIO
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
@@ -14,7 +17,9 @@ from sqlalchemy.orm import Session, aliased
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import AuditLog, Client, ClientImportBatch, ClientTask, Tenant, User, utcnow
+from app.models import (
+    AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow,
+)
 from app.schemas import (
     ClientCreate,
     ClientRead,
@@ -23,6 +28,10 @@ from app.schemas import (
     ClientTaskCreate,
     ClientTaskRead,
     ClientTaskUpdate,
+    ClientDocumentRead,
+    ClientDocumentReviewUpdate,
+    DocumentUploadLinkRead,
+    PublicDocumentUploadInfo,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -33,6 +42,10 @@ from app.schemas import (
     UserRead,
 )
 from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.document_storage import (
+    ALLOWED_EXTENSIONS, LINK_LIFETIME_DAYS, MAX_DOCUMENT_BYTES, MAX_UPLOADS_PER_LINK,
+    load_document, remove_stored_document, store_document, validate_uploaded_document,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -476,50 +489,7 @@ def download_client_import_csv_template(
 ):
     """Download a minimal CSV template for client imports."""
     _require_client_editor(current_user)
-    content = (
-        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
-    )
-    return Response(
-        content=content.encode("utf-8"),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="unik-modelo-clientes.csv"'},
-    )
-
-
-@router.get("/imports/client-template.xlsx", tags=["Imports"])
-def download_client_import_xlsx_template(
-    current_user: User = Depends(get_current_user),
-):
-    """Download an Excel template with a clients tab and usage instructions."""
-    _require_client_editor(current_user)
-    workbook = Workbook()
-    clients_sheet = workbook.active
-    clients_sheet.title = "Clientes"
-    headers = ["Razão Social", "Nome Fantasia", "CNPJ/CPF", "E-mail", "Telefone", "Status"]
-    clients_sheet.append(headers)
-    clients_sheet.freeze_panes = "A2"
-    clients_sheet.auto_filter.ref = "A1:F1"
-    widths = {"A": 34, "B": 28, "C": 20, "D": 32, "E": 20, "F": 16}
-    for column, width in widths.items():
-        clients_sheet.column_dimensions[column].width = width
-    for cell in clients_sheet[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="5C55B7")
-    for row_number in range(2, 1002):
-        clients_sheet.cell(row=row_number, column=3).number_format = "@"
-
-    instructions = workbook.create_sheet("Instruções")
-    instructions.append(["Como usar o modelo de clientes"])
-    instructions.append(["1. Preencha uma linha para cada cliente na aba Clientes."])
-    instructions.append(["2. Razão Social é obrigatória; mantenha a primeira linha de títulos."])
-    instructions.append(["3. CNPJ/CPF deve ser formatado como texto para preservar zeros à esquerda."])
-    instructions.append(["4. Status aceita Ativo ou Arquivado; se vazio, será considerado Ativo."])
-    instructions.append(["5. Salve como .xlsx e envie pelo menu Importações para revisar a prévia."])
-    instructions.column_dimensions["A"].width = 105
-    instructions["A1"].font = Font(bold=True, size=14)
-    workbook_buffer = BytesIO()
-    workbook.save(workbook_buffer)
-    workbook.close()
+    content = "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status" + chr(13) + chr(10)
     return Response(
         content=workbook_buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -904,3 +874,392 @@ def update_client_task(
         db.rollback()
         raise HTTPException(status_code=409, detail="Não foi possível atualizar a pendência.") from None
     return _serialize_task_record(_read_task(db, task.id, current_user.tenant_id))
+
+
+def _token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _datetime_expired(value) -> bool:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=utcnow().tzinfo)
+    return value <= utcnow()
+
+
+def _resolve_upload_link(db: Session, token: str, lock: bool = False):
+    if not token or len(token) > 256:
+        return None
+    query = select(DocumentUploadLink).where(
+        DocumentUploadLink.token_hash == _token_digest(token)
+    )
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    link = db.scalar(query)
+    if (
+        link is None
+        or link.revoked_at is not None
+        or _datetime_expired(link.expires_at)
+        or link.upload_count >= link.max_uploads
+    ):
+        return None
+    task = db.scalar(
+        select(ClientTask).where(
+            ClientTask.id == link.task_id,
+            ClientTask.tenant_id == link.tenant_id,
+        )
+    )
+    if task is None or task.kind != "document" or task.status in {"completed", "cancelled"}:
+        return None
+    return link, task
+
+
+def _serialize_document_record(record) -> dict:
+    document, task_title, client_name, reviewed_by_name = record
+    return {
+        "id": document.id,
+        "task_id": document.task_id,
+        "task_title": task_title,
+        "client_name": client_name,
+        "original_filename": document.original_filename,
+        "content_type": document.content_type,
+        "file_size": document.file_size,
+        "sha256": document.sha256,
+        "review_status": document.review_status,
+        "review_note": document.review_note,
+        "reviewed_by_name": reviewed_by_name,
+        "reviewed_at": document.reviewed_at.isoformat() if document.reviewed_at else None,
+        "created_at": document.created_at.isoformat() if document.created_at else None,
+    }
+
+
+def _document_snapshot_query():
+    reviewer = aliased(User)
+    return (
+        select(
+            ClientDocument,
+            ClientTask.title.label("task_title"),
+            Client.legal_name.label("client_name"),
+            reviewer.full_name.label("reviewed_by_name"),
+        )
+        .join(
+            ClientTask,
+            (ClientTask.id == ClientDocument.task_id)
+            & (ClientTask.tenant_id == ClientDocument.tenant_id),
+        )
+        .join(Client, (Client.id == ClientTask.client_id) & (Client.tenant_id == ClientTask.tenant_id))
+        .outerjoin(reviewer, reviewer.id == ClientDocument.reviewed_by_user_id)
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/upload-link",
+    response_model=DocumentUploadLinkRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Documents"],
+)
+def create_document_upload_link(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_task_editor(current_user)
+    task = db.scalar(
+        select(ClientTask).where(
+            ClientTask.id == task_id,
+            ClientTask.tenant_id == current_user.tenant_id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+    if task.kind != "document" or task.status in {"completed", "cancelled"}:
+        raise HTTPException(
+            status_code=409,
+            detail="O link só pode ser criado para uma solicitação de documento em aberto.",
+        )
+
+    now = utcnow()
+    previous_links = db.scalars(
+        select(DocumentUploadLink).where(
+            DocumentUploadLink.tenant_id == current_user.tenant_id,
+            DocumentUploadLink.task_id == task.id,
+            DocumentUploadLink.revoked_at.is_(None),
+        )
+    ).all()
+    for previous_link in previous_links:
+        previous_link.revoked_at = now
+    raw_token = secrets.token_urlsafe(32)
+    expiry = now + timedelta(days=LINK_LIFETIME_DAYS)
+    link = DocumentUploadLink(
+        tenant_id=current_user.tenant_id,
+        task_id=task.id,
+        created_by_user_id=current_user.id,
+        token_hash=_token_digest(raw_token),
+        expires_at=expiry,
+        max_uploads=MAX_UPLOADS_PER_LINK,
+        upload_count=0,
+    )
+    db.add(link)
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="document_upload_link.created",
+            entity_type="client_task",
+            entity_id=task.id,
+            details={"expires_at": expiry.isoformat(), "max_uploads": MAX_UPLOADS_PER_LINK},
+        )
+    )
+    db.commit()
+    return DocumentUploadLinkRead(
+        id=link.id,
+        public_path=f"/document-upload/{raw_token}",
+        expires_at=expiry.isoformat(),
+        max_uploads=MAX_UPLOADS_PER_LINK,
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/upload-links/{link_id}/revoke",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Documents"],
+)
+def revoke_document_upload_link(
+    task_id: str,
+    link_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_task_editor(current_user)
+    link = db.scalar(
+        select(DocumentUploadLink).where(
+            DocumentUploadLink.id == link_id,
+            DocumentUploadLink.task_id == task_id,
+            DocumentUploadLink.tenant_id == current_user.tenant_id,
+        )
+    )
+    if link is None:
+        raise HTTPException(status_code=404, detail="Link de envio não encontrado.")
+    if link.revoked_at is None:
+        link.revoked_at = utcnow()
+        db.add(
+            AuditLog(
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="document_upload_link.revoked",
+                entity_type="client_task",
+                entity_id=task_id,
+                details={"upload_link_id": link.id},
+            )
+        )
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/public/document-upload/{token}",
+    response_model=PublicDocumentUploadInfo,
+    tags=["Public document intake"],
+)
+def read_public_document_upload_link(token: str, db: Session = Depends(get_db)):
+    resolved = _resolve_upload_link(db, token)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="Este link não está disponível.")
+    link, task = resolved
+    return PublicDocumentUploadInfo(
+        title=task.title,
+        description=task.description,
+        expires_at=link.expires_at.isoformat(),
+        remaining_uploads=max(0, link.max_uploads - link.upload_count),
+        max_file_size_bytes=MAX_DOCUMENT_BYTES,
+        allowed_extensions=list(ALLOWED_EXTENSIONS),
+    )
+
+
+@router.post(
+    "/public/document-upload/{token}/files",
+    status_code=status.HTTP_201_CREATED,
+    tags=["Public document intake"],
+)
+async def upload_public_document(
+    token: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    if _resolve_upload_link(db, token) is None:
+        raise HTTPException(status_code=404, detail="Este link não está disponível.")
+    content = await file.read(MAX_DOCUMENT_BYTES + 1)
+    if len(content) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="O arquivo ultrapassa o limite de 10 MiB.")
+    try:
+        clean_name, content_type = validate_uploaded_document(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    resolved = _resolve_upload_link(db, token, lock=True)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="Este link não está mais disponível.")
+    link, task = resolved
+    extension = PurePosixPath(clean_name).suffix.lower()
+    storage_key = store_document(settings.document_storage_path, extension, content)
+    document = ClientDocument(
+        tenant_id=link.tenant_id,
+        task_id=task.id,
+        upload_link_id=link.id,
+        original_filename=clean_name,
+        storage_key=storage_key,
+        content_type=content_type,
+        file_size=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        review_status="pending",
+    )
+    link.upload_count += 1
+    if task.status == "open":
+        task.status = "received"
+    task.updated_at = utcnow()
+    db.add(document)
+    db.add(
+        AuditLog(
+            tenant_id=link.tenant_id,
+            actor_user_id=None,
+            action="document.uploaded",
+            entity_type="client_document",
+            entity_id=document.id,
+            details={
+                "task_id": task.id,
+                "file_size": len(content),
+                "content_type": content_type,
+            },
+        )
+    )
+    try:
+        db.commit()
+        db.refresh(document)
+    except Exception:
+        db.rollback()
+        remove_stored_document(settings.document_storage_path, storage_key)
+        raise
+    return {
+        "id": document.id,
+        "filename": document.original_filename,
+        "file_size": document.file_size,
+        "review_status": document.review_status,
+    }
+
+
+@router.get(
+    "/documents",
+    response_model=list[ClientDocumentRead],
+    tags=["Documents"],
+)
+def list_client_documents(
+    task_id: str | None = Query(default=None, min_length=1, max_length=36),
+    limit: int = Query(default=100, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    statement = _document_snapshot_query().where(
+        ClientDocument.tenant_id == current_user.tenant_id
+    )
+    if task_id is not None:
+        task_exists = db.scalar(
+            select(ClientTask.id).where(
+                ClientTask.id == task_id,
+                ClientTask.tenant_id == current_user.tenant_id,
+            )
+        )
+        if task_exists is None:
+            raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+        statement = statement.where(ClientDocument.task_id == task_id)
+    records = db.execute(
+        statement.order_by(ClientDocument.created_at.desc()).limit(limit)
+    ).all()
+    return [_serialize_document_record(record) for record in records]
+
+
+@router.get("/documents/{document_id}/download", tags=["Documents"])
+def download_client_document(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    document = db.scalar(
+        select(ClientDocument).where(
+            ClientDocument.id == document_id,
+            ClientDocument.tenant_id == current_user.tenant_id,
+        )
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    try:
+        content = load_document(settings.document_storage_path, document.storage_key)
+    except (FileNotFoundError, OSError):
+        raise HTTPException(status_code=404, detail="O arquivo não está disponível no armazenamento.") from None
+
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="document.downloaded",
+            entity_type="client_document",
+            entity_id=document.id,
+            details={"file_size": document.file_size},
+        )
+    )
+    db.commit()
+    quoted_name = quote(document.original_filename, safe="")
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]", "_", document.original_filename)
+    return Response(
+        content=content,
+        media_type=document.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quoted_name}',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.patch(
+    "/documents/{document_id}",
+    response_model=ClientDocumentRead,
+    tags=["Documents"],
+)
+def review_client_document(
+    document_id: str,
+    payload: ClientDocumentReviewUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_task_editor(current_user)
+    document = db.scalar(
+        select(ClientDocument).where(
+            ClientDocument.id == document_id,
+            ClientDocument.tenant_id == current_user.tenant_id,
+        )
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento não encontrado.")
+    document.review_status = payload.review_status
+    document.review_note = payload.review_note
+    document.reviewed_by_user_id = current_user.id
+    document.reviewed_at = utcnow()
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="document.reviewed",
+            entity_type="client_document",
+            entity_id=document.id,
+            details={"review_status": document.review_status},
+        )
+    )
+    db.commit()
+    record = db.execute(
+        _document_snapshot_query().where(
+            ClientDocument.id == document.id,
+            ClientDocument.tenant_id == current_user.tenant_id,
+        )
+    ).one()
+    return _serialize_document_record(record)

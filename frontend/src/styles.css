@@ -746,3 +746,50 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
   .task-metric-grid { grid-template-columns: 1fr; }
   .task-client-filter { align-items: stretch; flex-direction: column; gap: 6px; }
 }
+
+
+/* Recebimento de arquivos por link temporário */
+.document-upload-screen { display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 24px; }
+.public-upload-panel { width: min(100%, 600px); max-width: 600px; min-height: auto; margin: 20px auto; }
+.public-upload-content { margin: 36px 0 24px; }
+.public-upload-content h1 { font-size: clamp(25px, 5vw, 36px); line-height: 1.18; margin: 14px 0 12px; overflow-wrap: anywhere; }
+.public-upload-content > p { color: #777d91; font-size: 13px; line-height: 1.7; }
+.public-upload-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 22px 0; }
+.public-upload-rules > div { border: 1px solid #e7e9f0; background: #fafbfe; border-radius: 12px; padding: 12px; min-width: 0; }
+.public-upload-rules strong, .public-upload-rules span { display: block; overflow-wrap: anywhere; }
+.public-upload-rules strong { color: #777d91; font-size: 10px; margin-bottom: 6px; }
+.public-upload-rules span { color: #292e42; font-size: 11px; font-weight: 650; }
+.public-upload-form { display: grid; gap: 14px; }
+.public-upload-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 150px; padding: 18px; border: 1.5px dashed #cfd3e1; border-radius: 15px; background: #fafbff; cursor: pointer; color: #777d91; text-align: center; }
+.public-upload-drop svg { color: #5c5bbd; }
+.public-upload-drop strong { color: #2b3046; font-size: 13px; overflow-wrap: anywhere; }
+.public-upload-drop small { font-size: 10px; }
+.public-upload-drop input { max-width: 100%; font-size: 11px; }
+.public-upload-submit { width: 100%; justify-content: center; }
+.public-upload-privacy { display: flex; gap: 8px; align-items: flex-start; font-size: 10px !important; color: #878da0 !important; }
+.public-upload-privacy svg { flex: 0 0 auto; margin-top: 2px; }
+.task-documents { grid-column: 1 / -1; border-top: 1px solid #eceef4; padding-top: 12px; min-width: 0; }
+.task-documents-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.task-documents-head > strong { color: #646a80; font-size: 11px; }
+.task-upload-link { background: #f7f8fc; border: 1px solid #e5e8f1; border-radius: 10px; padding: 10px; margin-top: 10px; min-width: 0; }
+.task-upload-link label, .task-upload-link small { display: block; color: #777d91; font-size: 10px; }
+.task-link-copy-row { display: flex; align-items: center; gap: 8px; margin: 7px 0; min-width: 0; }
+.task-link-copy-row input { flex: 1; min-width: 0; border: 1px solid #dfe3ef; background: white; border-radius: 7px; padding: 8px; font-size: 10px; color: #444a62; }
+.task-link-copy-row button { flex: 0 0 auto; }
+.task-no-documents { margin: 10px 0 0; color: #a0a5b5; font-size: 10px; }
+.task-document-list { margin-top: 8px; display: grid; gap: 7px; }
+.task-document-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid #edf0f6; border-radius: 10px; padding: 9px; min-width: 0; }
+.task-document-info { min-width: 130px; flex: 1 1 220px; }
+.task-document-info strong, .task-document-info small { display: block; overflow-wrap: anywhere; }
+.task-document-info strong { color: #343950; font-size: 11px; }
+.task-document-info small { color: #858b9f; font-size: 9px; margin-top: 4px; }
+.task-document-info p { color: #a66d72; font-size: 10px; margin: 4px 0 0; }
+.task-document-accept { color: #2f8569; font-size: 10px; }
+@media (max-width: 600px) {
+  .document-upload-screen { padding: 12px; }
+  .public-upload-panel { padding: 24px 20px; }
+  .public-upload-rules { grid-template-columns: 1fr; }
+  .task-link-copy-row { flex-wrap: wrap; }
+  .task-link-copy-row input { flex-basis: 100%; }
+  .task-document-row > button { font-size: 9px; }
+}

@@ -68,6 +68,28 @@ const taskPriorityLabels: Record<ClientTask["priority"], string> = {
 };
 type TokenResponse = { access_token: string; token_type: string; expires_in: number };
 
+type ClientDocument = {
+  id: string; task_id: string; task_title: string; client_name: string;
+  original_filename: string; content_type: string; file_size: number; sha256: string;
+  review_status: "pending" | "accepted" | "rejected"; review_note: string | null;
+  reviewed_by_name: string | null; reviewed_at: string | null; created_at: string | null;
+};
+type DocumentUploadInfo = {
+  title: string; description: string | null; expires_at: string;
+  remaining_uploads: number; max_file_size_bytes: number; allowed_extensions: string[];
+};
+type UploadLinkResponse = { id: string; public_path: string; expires_at: string; max_uploads: number };
+type ActiveUploadLink = { id: string; url: string; expires_at: string };
+
+const documentReviewLabels: Record<ClientDocument["review_status"], string> = {
+  pending: "Aguardando conferência", accepted: "Conferido", rejected: "Precisa de correção",
+};
+function fileSizeLabel(size: number) {
+  if (size < 1024 * 1024) return Math.max(1, Math.round(size / 1024)) + " KB";
+  return (size / (1024 * 1024)).toFixed(1).replace(".", ",") + " MB";
+}
+
+
 async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
@@ -79,6 +101,98 @@ async function api<T>(path: string, init: RequestInit = {}, token?: string): Pro
     throw new Error(message);
   }
   return payload as T;
+}
+
+
+function PublicDocumentUploadPage({ token }: { token: string }) {
+  const [info, setInfo] = useState<DocumentUploadInfo | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    api<DocumentUploadInfo>("/api/v1/public/document-upload/" + encodeURIComponent(token))
+      .then(result => { if (active) setInfo(result); })
+      .catch(err => { if (active) setError(err instanceof Error ? err.message : "Este link não está disponível."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [token]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file || !info) return;
+    if (file.size > info.max_file_size_bytes) {
+      setError("O arquivo ultrapassa o limite de 10 MiB.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      await api<{ id: string; filename: string }>("/api/v1/public/document-upload/" + encodeURIComponent(token) + "/files", {
+        method: "POST", body: form,
+      });
+      setInfo(current => current ? { ...current, remaining_uploads: Math.max(0, current.remaining_uploads - 1) } : current);
+      setFile(null);
+      setSuccess("Arquivo enviado com sucesso. O escritório já pode conferir o documento.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível enviar o arquivo.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="login-screen document-upload-screen">
+      <section className="login-panel public-upload-panel">
+        <div className="brand-lockup">
+          <div className="brand-mark"><Building2 size={22} strokeWidth={2.3}/></div>
+          <div><span className="brand-name">unik<span>sistemas</span></span><span className="brand-subtitle">ENVIO SEGURO DE DOCUMENTOS</span></div>
+        </div>
+        {loading ? (
+          <div className="loading-state"><div className="spinner"/><span>Validando link...</span></div>
+        ) : error && !info ? (
+          <div className="public-upload-content"><div className="eyebrow">LINK INDISPONÍVEL</div><h1>Este endereço não está mais ativo.</h1><p>Peça ao escritório contábil para gerar um novo link de envio.</p><div className="alert alert-error" role="alert">{error}</div></div>
+        ) : info ? (
+          <div className="public-upload-content">
+            <div className="eyebrow"><span className="eyebrow-dot"/> SOLICITAÇÃO DE DOCUMENTO</div>
+            <h1>{info.title}</h1>
+            <p>{info.description || "Selecione o documento solicitado e envie para conferência pelo escritório."}</p>
+            <div className="public-upload-rules">
+              <div><strong>Prazo do link</strong><span>{formatDateTime(info.expires_at)}</span></div>
+              <div><strong>Envios restantes</strong><span>{info.remaining_uploads}</span></div>
+              <div><strong>Tamanho máximo</strong><span>10 MiB por arquivo</span></div>
+            </div>
+            {info.remaining_uploads > 0 ? (
+              <form className="public-upload-form" onSubmit={submit}>
+                <label className="public-upload-drop" htmlFor="public-document-file">
+                  <FileText size={24}/>
+                  <strong>{file ? file.name : "Escolher arquivo"}</strong>
+                  <small>{file ? fileSizeLabel(file.size) + " · pronto para enviar" : "PDF, PNG, JPG, CSV, XLSX ou DOCX"}</small>
+                  <input id="public-document-file" type="file" accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.docx" onChange={event => setFile(event.target.files?.[0] ?? null)} required/>
+                </label>
+                {error && <div className="alert alert-error" role="alert">{error}</div>}
+                {success && <div className="alert alert-success" role="status">{success}</div>}
+                <button className="button button-primary public-upload-submit" type="submit" disabled={!file || busy}>
+                  {busy ? "Enviando arquivo..." : "Enviar documento"} {!busy && <ArrowDownToLine size={16}/>}
+                </button>
+              </form>
+            ) : (
+              <div className="alert alert-success" role="status">Este link atingiu o limite de envios. O escritório poderá emitir outro, se necessário.</div>
+            )}
+            <p className="public-upload-privacy"><LockKeyhole size={14}/> O arquivo será disponibilizado apenas à equipe autenticada do escritório. Não envie senhas nem documentos que não foram solicitados.</p>
+          </div>
+        ) : null}
+        <div className="login-footer">UNIKSISTEMAS <span>·</span> ENVIO DE ARQUIVOS</div>
+      </section>
+    </main>
+  );
 }
 
 function initials(name: string) {
@@ -100,12 +214,16 @@ function formatDateTime(value: string | null) {
 }
 
 export default function App() {
+  const publicUploadToken = window.location.pathname.match(/^\/document-upload\/([^/]+)\/?$/)?.[1] ?? "";
   const [token, setToken] = useState(() => sessionStorage.getItem("unik_access_token") ?? "");
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks">("dashboard");
   const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [taskUploadLinks, setTaskUploadLinks] = useState<Record<string, ActiveUploadLink>>({});
+  const [taskLinkBusy, setTaskLinkBusy] = useState<string | null>(null);
   const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus>("open");
   const [taskClientFilter, setTaskClientFilter] = useState("all");
   const [taskSearch, setTaskSearch] = useState("");
@@ -151,8 +269,12 @@ export default function App() {
   const loadClientTasks = useCallback(async (activeToken: string) => {
     setTasksLoading(true);
     try {
-      const rows = await api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken);
+      const [rows, files] = await Promise.all([
+        api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken),
+        api<ClientDocument[]>("/api/v1/documents?limit=100", {}, activeToken),
+      ]);
       setTasks(rows);
+      setDocuments(files);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar as pendências.");
@@ -183,6 +305,8 @@ export default function App() {
       setImportBatch(null);
       setImportHistory([]);
       setTasks([]);
+      setDocuments([]);
+      setTaskUploadLinks({});
       setShowTaskForm(false);
       setTaskForm({
     client_id: "", title: "", description: "", kind: "document",
@@ -198,6 +322,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (publicUploadToken) {
+      setLoading(false);
+      return;
+    }
     if (token) {
       void loadWorkspace(token);
     } else {
@@ -218,7 +346,7 @@ export default function App() {
       setTaskSearch("");
       setCurrentPage("dashboard");
     }
-  }, [token, loadWorkspace]);
+  }, [token, loadWorkspace, publicUploadToken]);
 
   useEffect(() => {
     if (token && me && currentPage === "imports") {
@@ -353,6 +481,95 @@ export default function App() {
       setError(err instanceof Error ? err.message : "Não foi possível atualizar a pendência.");
     } finally {
       setTaskBusy(false);
+    }
+  }
+
+
+  async function handleCreateUploadLink(taskId: string) {
+    if (!token) return;
+    setTaskLinkBusy(taskId);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await api<UploadLinkResponse>("/api/v1/tasks/" + taskId + "/upload-link", { method: "POST" }, token);
+      setTaskUploadLinks(previous => ({
+        ...previous,
+        [taskId]: { id: result.id, url: window.location.origin + result.public_path, expires_at: result.expires_at },
+      }));
+      setSuccess("Link temporário gerado. Copie e envie ao cliente por um canal seguro.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível gerar o link de envio.");
+    } finally {
+      setTaskLinkBusy(null);
+    }
+  }
+
+  async function handleCopyUploadLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setSuccess("Link copiado. Envie-o ao cliente por um canal seguro.");
+    } catch {
+      setSuccess("Não foi possível copiar automaticamente. Selecione e copie o link exibido.");
+    }
+  }
+
+  async function handleRevokeUploadLink(taskId: string) {
+    if (!token || !taskUploadLinks[taskId]) return;
+    setTaskLinkBusy(taskId);
+    try {
+      await api<unknown>("/api/v1/tasks/" + taskId + "/upload-links/" + taskUploadLinks[taskId].id + "/revoke", { method: "POST" }, token);
+      setTaskUploadLinks(previous => {
+        const next = { ...previous };
+        delete next[taskId];
+        return next;
+      });
+      setSuccess("Link de envio revogado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível revogar o link.");
+    } finally {
+      setTaskLinkBusy(null);
+    }
+  }
+
+  async function handleReviewDocument(documentId: string, reviewStatus: "accepted" | "rejected") {
+    if (!token) return;
+    setTaskBusy(true);
+    setError("");
+    try {
+      const updated = await api<ClientDocument>("/api/v1/documents/" + documentId, {
+        method: "PATCH",
+        body: JSON.stringify({ review_status: reviewStatus }),
+      }, token);
+      setDocuments(previous => previous.map(item => item.id === updated.id ? updated : item));
+      setSuccess(reviewStatus === "accepted" ? "Documento conferido." : "Documento marcado para correção.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível registrar a conferência.");
+    } finally {
+      setTaskBusy(false);
+    }
+  }
+
+  async function handleDownloadDocument(documentId: string, filename: string) {
+    if (!token) return;
+    try {
+      const response = await fetch("/api/v1/documents/" + documentId + "/download", {
+        headers: { Authorization: "Bearer " + token },
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload.detail === "string" ? payload.detail : "Não foi possível baixar o arquivo.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível baixar o arquivo.");
     }
   }
 
@@ -539,6 +756,8 @@ export default function App() {
     setSuccess("");
     setCurrentPage("dashboard");
   }
+
+  if (publicUploadToken) return <PublicDocumentUploadPage token={publicUploadToken}/>;
 
   if (token && loading && !me) {
     return <main className="login-screen"><section className="login-panel loading-state"><div className="spinner"/><span>Preparando seu espaço de trabalho...</span></section></main>;
@@ -747,7 +966,7 @@ export default function App() {
                   <div className="filter-group task-status-filters" aria-label="Filtrar por situação">
                     {([{value:"open",label:"Pendentes"},{value:"received",label:"Recebidos"},{value:"completed",label:"Concluídos"},{value:"all",label:"Todos"}] as const).map(filter => <button key={filter.value} className={taskFilter === filter.value ? "filter active" : "filter"} onClick={() => setTaskFilter(filter.value)}>{filter.label}<span>{filter.value === "all" ? tasks.length : tasks.filter(task => task.status === filter.value).length}</span></button>)}
                   </div>
-                  <div className="task-client-filter"><label htmlFor="task-filter-client">Cliente</label><select id="task-filter-client" value={taskClientFilter} onChange={event => setTaskClientFilter(event.target.value)}><option value="all">Todos os clientes</option>{clients.map(client => <option key={client.id} value={client.id}>{client.trade_name || client.legal_name}</option>)}</select></div>
+                  <div className="task-client-filter"><label htmlFor="task-filter-client">Cliente</label><select id="task-filter-client" value={taskClientFilter} onChange={event => setTaskClientFilter(event.target.value)}><option value="all">Todos os clientes</option>{clients.map(client => <option key={client.id} value={client.id}>{client.trade_name || client.legal_name}</option>)}</select><button className="icon-button" onClick={() => void loadClientTasks(token)} disabled={tasksLoading} title="Atualizar pendências e documentos" aria-label="Atualizar pendências e documentos"><RefreshCw size={15}/></button></div>
                 </div>
                 {tasksLoading ? <div className="loading-state"><div className="spinner"/><span>Carregando pendências...</span></div> : filteredTasks.length === 0 ? <div className="import-history-empty"><ClipboardList size={24}/><strong>Nenhuma pendência neste filtro</strong><p>Cadastre uma nova pendência ou ajuste os filtros.</p></div> : (
                   <div className="task-list">
@@ -768,6 +987,15 @@ export default function App() {
                         <div className="task-deadline"><CalendarDays size={14}/><span className={overdue ? "task-overdue" : ""}>{task.due_date ? formatDate(task.due_date) : "Sem prazo"}{overdue ? " · Atrasada" : ""}</span></div>
                         <div className="task-assignee"><small>RESPONSÁVEL</small><span>{task.assigned_to_name || "Não atribuído"}</span></div>
                         <div className="task-status-cell"><span className={`status-pill ${task.status === "completed" ? "status-active" : task.status === "open" ? "status-pending" : "status-archived"}`}><i/>{taskStatusLabels[task.status]}</span>{canEditTasks && <div className="task-actions"><button className="button button-secondary task-action-button" disabled={taskBusy} onClick={() => void handleUpdateTask(task.id, {status:primaryAction.status})}>{primaryAction.label}</button>{!["completed","cancelled"].includes(task.status) && <button className="text-button task-cancel-button" disabled={taskBusy} onClick={() => void handleUpdateTask(task.id, {status:"cancelled"})}>Cancelar</button>}</div>}</div>
+                        {task.kind === "document" && (() => {
+                          const taskDocuments = documents.filter(document => document.task_id === task.id);
+                          const activeLink = taskUploadLinks[task.id];
+                          return <div className="task-documents">
+                            <div className="task-documents-head"><strong>Arquivos recebidos · {taskDocuments.length}</strong>{canEditTasks && !["completed","cancelled"].includes(task.status) && <button className="button button-secondary task-action-button" disabled={taskLinkBusy === task.id} onClick={() => void handleCreateUploadLink(task.id)}>{taskLinkBusy === task.id ? "Gerando..." : activeLink ? "Gerar novo link" : "Gerar link temporário"}</button>}</div>
+                            {activeLink && <div className="task-upload-link"><label>Link temporário — copie e envie ao cliente</label><div className="task-link-copy-row"><input aria-label="Link temporário de envio" readOnly value={activeLink.url}/><button className="button button-secondary task-action-button" onClick={() => void handleCopyUploadLink(activeLink.url)}>Copiar</button><button className="text-button task-cancel-button" onClick={() => void handleRevokeUploadLink(task.id)} disabled={taskLinkBusy === task.id}>Revogar</button></div><small>Expira em {formatDateTime(activeLink.expires_at)} · até 5 arquivos.</small></div>}
+                            {taskDocuments.length === 0 ? <p className="task-no-documents">Nenhum arquivo recebido ainda.</p> : <div className="task-document-list">{taskDocuments.map(document => <div className="task-document-row" key={document.id}><div className="task-document-info"><strong>{document.original_filename}</strong><small>{fileSizeLabel(document.file_size)} · {documentReviewLabels[document.review_status]} · {formatDateTime(document.created_at)}</small>{document.review_note && <p>{document.review_note}</p>}</div><button className="button button-secondary task-action-button" onClick={() => void handleDownloadDocument(document.id, document.original_filename)}><Download size={13}/> Baixar</button>{canEditTasks && document.review_status === "pending" && <><button className="text-button task-document-accept" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "accepted")}>Conferido</button><button className="text-button task-cancel-button" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "rejected")}>Pedir correção</button></>}</div>)}</div>}
+                          </div>;
+                        })()}
                       </article>;
                     })}
                   </div>

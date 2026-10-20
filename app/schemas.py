@@ -239,3 +239,45 @@ class ClientTaskRead(BaseModel):
     completed_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class DocumentUploadLinkRead(BaseModel):
+    id: str
+    public_path: str
+    expires_at: str
+    max_uploads: int
+
+
+class PublicDocumentUploadInfo(BaseModel):
+    title: str
+    description: str | None = None
+    expires_at: str
+    remaining_uploads: int
+    max_file_size_bytes: int
+    allowed_extensions: list[str]
+
+
+class ClientDocumentRead(BaseModel):
+    id: str
+    task_id: str
+    task_title: str
+    client_name: str
+    original_filename: str
+    content_type: str
+    file_size: int
+    sha256: str
+    review_status: Literal["pending", "accepted", "rejected"]
+    review_note: str | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: str | None = None
+    created_at: str | None = None
+
+
+class ClientDocumentReviewUpdate(BaseModel):
+    review_status: Literal["accepted", "rejected"]
+    review_note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("review_note")
+    @classmethod
+    def normalize_review_note(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
