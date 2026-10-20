@@ -1,101 +1,104 @@
 # UnikSistemas
 ### Sistema integrado para escritórios contábeis
 
-O **UnikSistemas** é um projeto de sistema web para apoiar a operação de escritórios contábeis, com foco em organização de clientes e tarefas, importação de dados, segurança e evolução gradual para um modelo **SaaS multi-tenant** — vários escritórios usando a mesma plataforma com isolamento rigoroso entre seus dados.
+O **UnikSistemas** está começando como uma plataforma web para apoiar escritórios contábeis, com objetivo de evoluir para um SaaS multi-tenant. A fundação inicial inclui uma API autenticada para escritórios e cadastro de clientes, e a primeira interface web conecta o login e a gestão de clientes aos endpoints da API.
 
-> **Status do projeto:** fase inicial de planejamento e estruturação. As funcionalidades descritas neste README representam objetivos e propostas de escopo; não devem ser interpretadas como funcionalidades já implementadas ou disponíveis em produção.
+> **Status:** MVP inicial em desenvolvimento. Não é um sistema contábil completo e não deve ser usado para processar obrigações fiscais ou dados reais de clientes em produção.
 
-## Objetivo
+## O que está incluído nesta entrega
 
-Construir um sistema seguro, modular e sustentável para centralizar rotinas do escritório contábil, começando por um MVP de escopo controlado e ampliando as integrações e automações somente após testes e validação operacional.
+- API REST em FastAPI com documentação OpenAPI.
+- PostgreSQL, SQLAlchemy e migrações Alembic.
+- Provisionamento controlado de escritório e usuário responsável.
+- Login por identificador do escritório, e-mail e senha, com JWT de expiração e hashes Argon2.
+- Cadastro, listagem e consulta de clientes isolados por tenant.
+- Auditoria inicial para criação de clientes.
+- Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
+- Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
+- Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
 
-## Diretrizes do produto
+Consulte a [arquitetura inicial](docs/architecture-initial.md) e o [briefing do sistema contábil](docs/briefing-sistema-contabil.md).
 
-- **Nuvem:** aplicação web preparada para operação hospedada e evolução contínua.
-- **SaaS multi-tenant:** isolamento de dados, usuários e permissões por escritório.
-- **MVP seguro:** priorizar os fluxos essenciais antes de ampliar o escopo.
-- **Integração progressiva:** começar com importação de dados e operação assistida; automatizar etapas depois de validar regras e resultados.
-- **Rastreabilidade:** registrar ações importantes, origem dos dados, erros de importação e alterações relevantes.
-- **Desenvolvimento com IA:** usar ChatGPT e Claude como apoio à análise, implementação e revisão, com testes e aprovação humana antes do merge.
-- **Conformidade:** regras contábeis, tributárias e obrigações legais devem ser verificadas com fontes oficiais e validadas por profissional responsável antes de uso operacional.
+## Requisitos
 
-## Escopo inicial proposto
+- Docker Engine com Docker Compose
+- Git
+- Segredos aleatórios para `SECRET_KEY` e `BOOTSTRAP_TOKEN`
 
-O escopo abaixo é uma base para refinamento do produto, não uma declaração de entrega concluída.
+## Executar localmente
 
-1. **Escritórios e usuários** — cadastro de tenants, usuários, perfis e permissões.
-2. **Clientes do escritório** — cadastro e organização das empresas atendidas.
-3. **Importação de dados** — envio de arquivos, validação, prévia de inconsistências, relatório de erros e registro da origem.
-4. **Documentos** — armazenamento e organização de metadados com acesso restrito e trilha de auditoria.
-5. **Tarefas e pendências** — acompanhamento de atividades, responsáveis, prazos e status.
-6. **Painel operacional** — visão de pendências e status dos fluxos principais.
-7. **Auditoria e observabilidade** — eventos relevantes, erros e monitoramento sem registrar segredos desnecessários.
+1. Copie `.env.example` para `.env`.
+2. Troque `SECRET_KEY` e `BOOTSTRAP_TOKEN` por valores aleatórios fortes. Nunca use os valores de exemplo fora do desenvolvimento local.
+3. Inicie a API, PostgreSQL e frontend:
 
-Transmissões fiscais, operações financeiras irreversíveis e outras ações de alto impacto não devem ser automatizadas no MVP sem autorização explícita, controles e validação adequada.
+    docker compose up --build -d
+    docker compose logs -f api frontend
 
-## Princípios de arquitetura e segurança
+4. Acesse a interface em <http://127.0.0.1:3000> e a documentação da API em <http://127.0.0.1:8000/docs>.
 
-- Toda operação que envolva dados de negócio deve ser autorizada no servidor e delimitada pelo tenant correto.
-- Aplicar menor privilégio para usuários, serviços, agentes de IA e tokens de integração.
-- Manter segredos em variáveis protegidas ou serviço de gerenciamento de segredos; nunca versionar chaves, senhas ou tokens.
-- Separar ambientes de desenvolvimento, testes e produção.
-- Usar dados fictícios ou anonimizados durante o desenvolvimento; não enviar documentos reais de clientes a modelos de IA sem avaliação prévia das bases legais, contratos e políticas de tratamento aplicáveis.
-- Ter backups e testar procedimentos de restauração.
-- Cobrir com testes os limites de autorização e o isolamento entre tenants.
-- Fazer revisão humana das mudanças e validar dependências, migrações e impactos antes de integrar código.
-- Aplicar monitoramento, limites de consumo e registro de auditoria nas integrações externas.
+Verificações de saúde:
+- <http://127.0.0.1:8000/health/live>
+- <http://127.0.0.1:8000/health/ready>
+- <http://127.0.0.1:3000/health>
 
-A stack tecnológica definitiva, o modelo de dados e os contratos de API devem ser registrados em documentos técnicos revisados antes de serem considerados decisões oficiais do projeto.
+As portas estão vinculadas ao loopback por padrão e não expostas diretamente para a rede local.
 
-## Fluxo de desenvolvimento
+## Provisionar o primeiro escritório
 
-1. Registrar cada demanda com objetivo, requisitos e critérios de aceitação.
-2. Analisar o código e as decisões já documentadas antes de planejar mudanças.
-3. Propor a implementação e identificar riscos.
-4. Trabalhar em uma branch dedicada por tarefa.
-5. Executar testes automatizados e verificações estáticas em ambiente isolado.
-6. Abrir um Pull Request com resumo, arquivos alterados, resultados dos testes e limitações conhecidas.
-7. Exigir revisão e aprovação humana antes do merge.
-8. Executar deploy por processo separado, autorizado e auditável.
+O segredo de provisionamento em `BOOTSTRAP_TOKEN` deve ser usado apenas pelo operador autorizado. Exemplo via curl:
 
-### Uso de ChatGPT e Claude
+    curl -X POST http://127.0.0.1:8000/api/v1/setup/tenants \
+      -H "Content-Type: application/json" \
+      -H "X-Bootstrap-Token: SUBSTITUA_PELO_SEU_SEGREDO" \
+      -d '{
+        "tenant_name": "Escritório Exemplo",
+        "tenant_slug": "escritorio-exemplo",
+        "owner_email": "responsavel@example.com",
+        "owner_full_name": "Responsável do Escritório",
+        "owner_password": "Use-Uma-Senha-Forte-Aqui-2026"
+      }'
 
-Os dois provedores podem ser coordenados por um orquestrador via APIs oficiais. Por exemplo, um agente pode planejar uma tarefa e outro propor ou revisar a implementação. O GitHub permanece como fonte versionada do código e dos documentos. As APIs têm credenciais e custos próprios; as conversas dos produtos ChatGPT e Claude não são compartilhadas automaticamente. Requisitos e decisões importantes devem ser registrados no repositório.
+Na primeira versão, o provisionamento é uma operação do operador, não um cadastro público. Depois, entre na interface usando o slug do escritório, e-mail e senha do usuário owner criado. O frontend armazena o token no `sessionStorage` e o descarta ao sair; antes de produção, a estratégia de sessão deve passar por revisão específica de segurança.
 
-## Roadmap sugerido
+**Não comite `.env` e não compartilhe o segredo de provisionamento.** Rotacione/remova `BOOTSTRAP_TOKEN` quando não for mais necessário.
 
-| Fase | Resultado esperado |
-|---|---|
-| 1. Descoberta | Requisitos priorizados, personas, fluxos e critérios de aceitação |
-| 2. Fundação técnica | Stack validada, arquitetura, modelo de dados, autenticação e isolamento multi-tenant |
-| 3. MVP operacional | Cadastros essenciais, importação assistida, tarefas e auditoria |
-| 4. Qualidade e segurança | Testes, revisão de permissões, backups, monitoração e validação com dados fictícios |
-| 5. Integrações | Conectores e automações graduais, inicialmente com supervisão |
-| 6. SaaS e escala | Provisionamento de tenants, gestão de planos e controles operacionais, após validação da base |
+## Executar testes localmente
 
-A ordem e o conteúdo deste roadmap devem ser ajustados conforme os requisitos detalhados e as limitações técnicas descobertas durante a inspeção do repositório.
+Backend:
 
-## Documentação do projeto
+    python -m venv .venv
+    # Windows PowerShell: .venv\Scripts\Activate.ps1
+    # Linux/macOS: source .venv/bin/activate
+    pip install -r requirements-dev.txt
+    ruff check app tests
+    pytest -q
 
-- [Briefing do Sistema Contábil](docs/briefing-sistema-contabil.md) — contexto inicial, diretrizes, proposta de MVP e próximos passos técnicos.
-- Arquitetura, modelo de dados, contratos de API, mapa de telas, backlog e plano de testes deverão ser adicionados quando revisados e aprovados.
+Frontend:
 
-## Estrutura do repositório
+    cd frontend
+    npm install
+    npm run build
 
-A estrutura evoluirá conforme a implementação. Não presuma que diretórios ou módulos previstos já existem. Antes de adicionar uma funcionalidade, verifique o estado atual do código e atualize a documentação correspondente.
+O CI executa lint, testes do backend e migração contra PostgreSQL, além de compilar o frontend.
 
-## Configuração e execução
+## Funcionalidades ainda não implementadas
 
-A configuração para desenvolvimento será documentada assim que a stack e o esqueleto executável do produto forem definidos e adicionados ao repositório. Este README, por si só, não significa que a aplicação já esteja pronta para executar ou implantar.
+- Gestão completa de usuários, equipes, perfis e permissões.
+- Recuperação de senha e MFA.
+- Importação de planilhas com prévia/validação e relatório de erros.
+- Gestão documental, pendências e rotinas contábeis.
+- Integrações fiscais, envio de declarações ou automações irreversíveis.
+- Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
+- Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 
-## Como contribuir
+Não exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
 
-- Mantenha as mudanças pequenas e focadas.
-- Documente decisões que afetem arquitetura, segurança ou comportamento de negócio.
-- Inclua testes para novas regras e correções.
-- Não inclua credenciais, dados pessoais reais ou documentos contábeis de clientes.
-- Abra Pull Requests para revisão; não integre diretamente à branch principal sem seguir as regras do repositório.
+## Desenvolvimento
+
+Abra uma branch por tarefa, mantenha diffs pequenos, escreva testes e documente decisões. Toda mudança deve passar por Pull Request e aprovação humana antes de integrar à branch principal. Deploy deve ser uma etapa separada e autorizada.
+
+As APIs de ChatGPT e Claude são ferramentas de apoio ao desenvolvimento, não fontes de verdade para regras fiscais. Regras tributárias e obrigações legais exigem fontes oficiais e validação profissional.
 
 ## Licença
 
-Consulte o arquivo [LICENSE](LICENSE) para os termos aplicáveis ao repositório.
+Consulte o arquivo [LICENSE](LICENSE).
