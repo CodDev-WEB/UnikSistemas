@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import EmailStr, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 class Settings(BaseSettings):
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
         if self.app_env == "production":
             try:
                 database_url = make_url(self.database_url)
-            except Exception as exc:
+            except ArgumentError as exc:
                 raise ValueError("DATABASE_URL inválida para produção.") from exc
             if database_url.drivername != "postgresql+psycopg":
                 raise ValueError("Em produção, DATABASE_URL deve usar PostgreSQL com o driver psycopg.")
