@@ -1,65 +1,46 @@
-# Arquitetura inicial — UnikSistemas
+# Arquitetura atual — UnikSistemas
 
-## Decisões da primeira entrega
+## Componentes
 
-- API REST: FastAPI com documentação OpenAPI.
-- Linguagem: Python 3.12.
-- Persistência: PostgreSQL; SQLite usado somente em testes rápidos.
-- ORM e migrações: SQLAlchemy 2 e Alembic.
-- Autenticação: JWT Bearer com expiração; senhas armazenadas com Argon2.
-- Isolamento multi-tenant: o usuário pertence a um tenant; o tenant é obtido do token validado e as consultas de clientes são filtradas no servidor pelo tenant_id.
-- Operação local: Docker Compose com API e PostgreSQL.
-- Qualidade: pytest, Ruff e verificação de migrações no GitHub Actions.
-- Entrega: branch de funcionalidade e Pull Request; sem merge ou deploy automático.
+- **Frontend:** React + TypeScript + Vite; servido pelo Nginx e encaminhando `/api/` para a API na mesma origem.
+- **API:** FastAPI / Python 3.12 com autenticação JWT Bearer e senhas em Argon2.
+- **Banco:** PostgreSQL; SQLAlchemy 2 e migrações Alembic.
+- **Armazenamento de arquivos:** volume persistente Docker configurado por `DOCUMENT_STORAGE_PATH`.
+- **Worker:** processo separado que gera lembretes e processa a fila SMTP quando o envio estiver habilitado.
+- **Qualidade:** pytest, Ruff, build do frontend e migração PostgreSQL em GitHub Actions.
 
-## Endpoints iniciais
+## Recursos já implementados
 
-| Método | Endpoint | Descrição |
-|---|---|---|
-| GET | /health/live | Liveness sem dependência do banco |
-| GET | /health/ready | Verifica conexão com o banco |
-| POST | /api/v1/setup/tenants | Provisiona um tenant e seu owner com segredo operacional |
-| POST | /api/v1/auth/token | Login por slug do escritório, e-mail e senha |
-| GET | /api/v1/me | Retorna o usuário autenticado e o tenant |
-| GET | /api/v1/clients | Lista clientes somente do tenant autenticado |
-| POST | /api/v1/clients | Cria cliente e gera evento de auditoria |
-| GET | /api/v1/clients/{client_id} | Consulta um cliente dentro do tenant autenticado |
-| GET | /api/v1/users | Lista usuários do próprio escritório (responsável/administrador) |
-| POST | /api/v1/users | Cria usuário no escritório com perfil permitido |
-| PATCH | /api/v1/users/{user_id} | Atualiza nome, perfil ou estado do acesso dentro do mesmo tenant |
+1. Provisionamento de escritório controlado e login por slug, e-mail e senha.
+2. Isolamento por `tenant_id` para cadastros, equipe, pendências, documentos e notificações.
+3. Papéis `owner`, `admin`, `accountant`, `assistant` e `viewer`, com verificações no backend.
+4. Cadastro de clientes e importação CSV/XLSX com prévia, validação, confirmação explícita, modelos e histórico.
+5. Pendências por cliente com responsável, prioridade, prazo e estado.
+6. Link público temporário para envio de documentos, com expiração, limite de uploads, revogação, metadados, download autenticado e revisão pela equipe.
+7. Caixa de notificações por usuário para documentos recebidos, novas atribuições e lembretes de prazo.
+8. Fila de e-mail SMTP opcional, desabilitada por padrão, com estado de entrega e reenvio manual de falhas.
+9. Auditoria de operações relevantes e pipeline automatizado de testes.
 
-## Matriz inicial de permissões
+## Principais fluxos de segurança
 
-| Perfil | Listar/consultar clientes | Cadastrar clientes | Gerenciar usuários |
-|---|---:|---:|---:|
-| owner | Sim | Sim | Sim |
-| admin | Sim | Sim | Sim, exceto owner e outros admins |
-| accountant | Sim | Sim | Não |
-| assistant | Sim | Sim | Não |
-| viewer | Sim | Não | Não |
+- A API determina o escritório a partir do token validado; não confia no `tenant_id` fornecido pelo cliente.
+- Listas, alterações e downloads filtram o recurso pelo escritório autenticado; notificações são também restritas ao destinatário.
+- O perfil de Consulta é somente leitura para os módulos operacionais.
+- Links de upload armazenam apenas o hash do token, expiram em sete dias e aceitam até cinco arquivos de até 10 MiB.
+- Credenciais SMTP são lidas do ambiente. O worker não tenta entregar e-mails enquanto `EMAIL_NOTIFICATIONS_ENABLED=false`.
+- O perfil `production` exige PostgreSQL via psycopg, segredos fortes e senha de banco com pelo menos 24 caracteres.
 
-- O tenant é derivado do token validado no backend; não é aceito do corpo da requisição para gestão de usuários/clientes.
-- Um administrador não pode criar outro administrador, administrar o responsável nem desativar o próprio acesso.
-- O responsável não pode desativar a própria conta. Alterações de usuário registram evento de auditoria.
-- O endpoint de gestão não aceita atribuir o perfil owner; o provisionamento inicial continua separado e protegido por segredo operacional.
+## Limites e riscos remanescentes
 
-## Limites conhecidos
+- O MVP não é um sistema contábil/fiscal completo: não transmite declarações, calcula tributos nem integra serviços fiscais oficiais.
+- A validação de tipo de arquivo não substitui inspeção antimalware; upload público ainda precisa de rate limiting.
+- A proteção de segredos e banco em produção exige secret manager, política de rotação e backups com restauração testada.
+- O deploy precisa de TLS/HTTPS, HSTS na borda, monitoramento, alertas e estratégia de retenção de documentos.
+- A autenticação ainda usa token no `sessionStorage`; revisar sessão, proteção contra XSS, recuperação de senha e MFA antes de uso externo.
+- A fila SMTP exige teste real em homologação, política para e-mails antigos acumulados e verificação de entrega/reenvio.
+- O CORS atual permite PATCH e DELETE para eventuais frontends em origem separada; o caminho recomendado continua sendo frontend/API na mesma origem.
+- Não são aceitos dados reais de clientes em desenvolvimento/testes. Regras tributárias dependem de fonte oficial e revisão profissional.
 
-Esta entrega é uma fundação, não um sistema contábil pronto para produção.
+## Próxima etapa recomendada
 
-- Provisionamento de tenant exige segredo operacional. Remova ou rotacione BOOTSTRAP_TOKEN após o provisionamento quando não for necessário.
-- Ainda não existe recuperação de senha, MFA, convites por e-mail, rate limiting, fila de tarefas ou integrações fiscais.
-- Auditoria inicial cobre criação de clientes; precisa ser ampliada e protegida conforme requisitos de auditoria.
-- Não há validação de dígitos verificadores nem consulta oficial para identificadores fiscais.
-- Antes de uso público, adicionar rate limiting, secret manager, HTTPS/reverse proxy, monitoramento, backups/restauração e revisão de segurança.
-- Não enviar dados reais de clientes às IAs sem revisão de políticas, contratos e bases legais.
-- Regras tributárias exigem validação com fontes oficiais e profissional responsável.
-
-## Próximas entregas candidatas
-
-1. Edição de cadastros com auditoria.
-2. Gestão de usuários e permissões por função.
-3. Importação assistida de planilhas com prévia e relatório de erros.
-4. Frontend para login, painel e clientes.
-5. Filas de processamento, alertas e observabilidade.
-6. Plano de testes de isolamento multi-tenant e revisão de segurança.
+Antes de módulos fiscais, concluir uma etapa de prontidão operacional: rate limiting no login/upload, teste do transporte SMTP com mock e homologação, política para fila acumulada, revisão independente do isolamento multi-tenant, backup/restauração e definição de ambiente de staging. Só depois preparar deployment HTTPS com segredos protegidos e aprovação humana.
