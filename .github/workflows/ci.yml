@@ -69,3 +69,18 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+
+  nginx-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Nginx rate-limit and reverse-proxy configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/frontend:/fixture:ro" \
+            nginx:1.27-alpine sh -c '
+              mkdir -p /etc/nginx/snippets &&
+              cp /fixture/nginx.conf /etc/nginx/conf.d/default.conf &&
+              cp /fixture/snippets/api-proxy.conf /etc/nginx/snippets/api-proxy.conf &&
+              nginx -t
+            '
