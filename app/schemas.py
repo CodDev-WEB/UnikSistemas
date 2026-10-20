@@ -281,3 +281,26 @@ class ClientDocumentReviewUpdate(BaseModel):
     @classmethod
     def normalize_review_note(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
+
+
+class NotificationRead(BaseModel):
+    id: str
+    event_type: Literal["document_received", "task_assigned", "task_due"]
+    title: str
+    message: str
+    entity_type: str
+    entity_id: str
+    action_url: str | None = None
+    is_read: bool
+    email_status: Literal["pending", "sent", "failed"]
+    email_attempts: int
+    email_sent_at: str | None = None
+    created_at: str | None = None
+
+
+class NotificationSummaryRead(BaseModel):
+    created: int
+    due_items_checked: int
+    email_enabled: bool
+    queued_email_count: int
+    failed_email_count: int
