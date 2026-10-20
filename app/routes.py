@@ -1,7 +1,7 @@
 import hashlib
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from io import BytesIO
@@ -1470,11 +1470,11 @@ def get_antivirus_status(
     database_date = health.signature_database_date if health is not None else None
     signature_age_hours = None
     if database_date is not None:
-        current = datetime.now(timezone.utc)
+        current = datetime.now(UTC)
         built = (
-            database_date.replace(tzinfo=timezone.utc)
+            database_date.replace(tzinfo=UTC)
             if database_date.tzinfo is None
-            else database_date.astimezone(timezone.utc)
+            else database_date.astimezone(UTC)
         )
         signature_age_hours = round((current - built).total_seconds() / 3600, 1)
     pending = int(
