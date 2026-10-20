@@ -153,12 +153,12 @@ def process_email_queue(db: Session, settings: Settings, limit: int = 50) -> dic
     return {"sent": sent, "failed": failed, "skipped": skipped}
 
 
-def enqueue_due_reminders(db: Session, today: date, days_ahead: int = 1) -> dict[str, int]:
+def enqueue_due_reminders(\n    db: Session, today: date, days_ahead: int = 1, tenant_id: str | None = None\n) -> dict[str, int]:
     """Create at most one reminder per user/task/day for open or received work."""
     from datetime import timedelta
 
     cutoff = today + timedelta(days=max(0, min(days_ahead, 7)))
-    rows = db.execute(
+    statement = (
         select(ClientTask, Client.legal_name, User)
         .join(
             Client,
@@ -174,7 +174,11 @@ def enqueue_due_reminders(db: Session, today: date, days_ahead: int = 1) -> dict
             ClientTask.due_date <= cutoff,
             User.is_active.is_(True),
         )
-        .order_by(ClientTask.due_date.asc(), ClientTask.id.asc())
+    )
+    if tenant_id is not None:
+        statement = statement.where(ClientTask.tenant_id == tenant_id)
+    rows = db.execute(
+        statement.order_by(ClientTask.due_date.asc(), ClientTask.id.asc())
     ).all()
 
     created = 0
