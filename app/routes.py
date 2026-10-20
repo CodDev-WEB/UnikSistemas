@@ -490,9 +490,7 @@ def download_client_import_csv_template(
     """Download a minimal CSV template for client imports."""
     _require_client_editor(current_user)
     content = (
-        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
-    )
-    return Response(
+    content = "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status" + chr(13) + chr(10)
         content=content.encode("utf-8"),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="unik-modelo-clientes.csv"'},
