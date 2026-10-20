@@ -14,7 +14,7 @@ COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini .
 COPY docker-entrypoint.sh .
-RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+RUN useradd --create-home --uid 10001 appuser && mkdir -p /var/lib/unik/uploads && chown -R appuser:appuser /app /var/lib/unik
 USER appuser
 
 EXPOSE 8000
