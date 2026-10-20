@@ -51,7 +51,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://unik:unik_dev_password@db:5432/unik}
+      DATABASE_URL: ${DATABASE_URL:?Set_DATABASE_URL_in_.env}
     command: ["python", "-m", "app.notification_worker"]
     depends_on:
       api:
