@@ -16,6 +16,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Perfis iniciais: responsável, administrador, contador(a), assistente e consulta (somente leitura).
 - Importação assistida de clientes por CSV/XLSX, com prévia, validação, detecção de duplicidades e confirmação explícita.
 - Auditoria inicial para criação de clientes, importações confirmadas, alterações de usuários e recebimento/revisão de documentos.
+- Recebimento público em quarentena com análise ClamAV assíncrona; downloads e conferência ficam bloqueados até o resultado limpo.
 - Caixa de notificações por usuário, alertas diários de prazo e fila de e-mail SMTP opcional para a equipe.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
@@ -36,7 +37,7 @@ Consulte a [arquitetura inicial](docs/architecture-initial.md) e o [briefing do 
 3. Inicie a API, PostgreSQL e frontend:
 
     docker compose up --build -d
-    docker compose logs -f api frontend notification-worker
+    docker compose logs -f api frontend notification-worker document-scan-worker clamav
 
 4. Acesse a interface em <http://127.0.0.1:3000> e a documentação da API em <http://127.0.0.1:8000/docs>.
 
@@ -91,6 +92,9 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Observabilidade avançada, alertas operacionais e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
+- Política de retenção e limpeza operacional de arquivos infectados em quarentena; revisão do scanner e plano de resposta a incidentes.
+
+O recebimento de arquivos usa ClamAV em um serviço isolado, com base de assinaturas persistida. A primeira inicialização pode levar vários minutos enquanto o scanner baixa e carrega as assinaturas. Reserve cerca de 4 GiB de memória para o contêiner ClamAV, conforme a orientação oficial; o worker só processa documentos quando o serviço estiver saudável. Os novos envios ficam em `quarantine/` e só são movidos para `clean/` após resposta limpa. Arquivos infectados ou com falha de análise não ficam disponíveis para download; falhas definitivas podem ser reenfileiradas pelo responsável ou administrador. Para acompanhar a análise, use `docker compose logs -f document-scan-worker clamav`.
 
 O perfil de produção também exige PostgreSQL via `postgresql+psycopg` e senha de banco com ao menos 24 caracteres; as rotas de documentação OpenAPI são desativadas nesse perfil. O Nginx aplica cabeçalhos básicos de proteção no navegador e limites de requisição para login (5/min, burst 4), provisionamento (2/min, burst 1), consulta pública de links (30/min, burst 10) e envio de arquivos (6/min, burst 2). Esses limites são aplicados na borda Nginx e usam `X-Real-IP` quando informado; o proxy HTTPS externo deve **sobrescrever** esse cabeçalho com o IP real do cliente, nunca confiar no valor enviado pelo próprio cliente. Se o proxy não estiver configurado para isso, os limites podem compartilhar o mesmo bucket entre usuários. Não exponha a API diretamente e não publique o serviço frontend fora do proxy confiável. O proxy de borda ainda deve terminar TLS/HTTPS e aplicar HSTS.
 

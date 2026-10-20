@@ -92,9 +92,11 @@ function notificationKindLabel(kind: NotificationEventType) {
 }
 
 
+type DocumentScanStatus = "pending" | "scanning" | "clean" | "infected" | "error";
 type ClientDocument = {
   id: string; task_id: string; task_title: string; client_name: string;
   original_filename: string; content_type: string; file_size: number; sha256: string;
+  scan_status: DocumentScanStatus; scan_attempts: number; scan_completed_at: string | null;
   review_status: "pending" | "accepted" | "rejected"; review_note: string | null;
   reviewed_by_name: string | null; reviewed_at: string | null; created_at: string | null;
 };
@@ -107,6 +109,13 @@ type ActiveUploadLink = { id: string; url: string; expires_at: string };
 
 const documentReviewLabels: Record<ClientDocument["review_status"], string> = {
   pending: "Aguardando conferência", accepted: "Conferido", rejected: "Precisa de correção",
+};
+const documentScanLabels: Record<DocumentScanStatus, string> = {
+  pending: "Aguardando análise antimalware",
+  scanning: "Análise antimalware em andamento",
+  clean: "Verificação de segurança aprovada",
+  infected: "Bloqueado: ameaça detectada",
+  error: "Falha na análise antimalware",
 };
 function fileSizeLabel(size: number) {
   if (size < 1024 * 1024) return Math.max(1, Math.round(size / 1024)) + " KB";
@@ -316,6 +325,22 @@ export default function App() {
       setTasksLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const awaitingScan = documents.some(document =>
+      document.scan_status === "pending" || document.scan_status === "scanning"
+    );
+    if (!token || currentPage !== "tasks" || !awaitingScan) return;
+    const refreshTimer = window.setInterval(async () => {
+      try {
+        const rows = await api<ClientDocument[]>("/api/v1/documents?limit=100", {}, token);
+        setDocuments(rows);
+      } catch {
+        // Keep the current quarantine state visible; the next poll can recover.
+      }
+    }, 15000);
+    return () => window.clearInterval(refreshTimer);
+  }, [token, currentPage, documents]);
 
   const loadNotifications = useCallback(async (activeToken: string, canManageEmail: boolean) => {
     setNotificationsLoading(true);
@@ -612,6 +637,23 @@ export default function App() {
       setSuccess(reviewStatus === "accepted" ? "Documento conferido." : "Documento marcado para correção.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível registrar a conferência.");
+    } finally {
+      setTaskBusy(false);
+    }
+  }
+
+  async function handleRetryDocumentScan(documentId: string) {
+    if (!token || !["owner", "admin"].includes(me?.user.role ?? "")) return;
+    setTaskBusy(true);
+    setError("");
+    try {
+      const updated = await api<ClientDocument>("/api/v1/documents/" + documentId + "/retry-scan", {
+        method: "POST",
+      }, token);
+      setDocuments(previous => previous.map(item => item.id === updated.id ? updated : item));
+      setSuccess("Nova tentativa de análise antimalware adicionada à fila.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível reenfileirar a análise.");
     } finally {
       setTaskBusy(false);
     }
@@ -1215,7 +1257,7 @@ export default function App() {
                           return <div className="task-documents">
                             <div className="task-documents-head"><strong>Arquivos recebidos · {taskDocuments.length}</strong>{canEditTasks && !["completed","cancelled"].includes(task.status) && <button className="button button-secondary task-action-button" disabled={taskLinkBusy === task.id} onClick={() => void handleCreateUploadLink(task.id)}>{taskLinkBusy === task.id ? "Gerando..." : activeLink ? "Gerar novo link" : "Gerar link temporário"}</button>}</div>
                             {activeLink && <div className="task-upload-link"><label>Link temporário — copie e envie ao cliente</label><div className="task-link-copy-row"><input aria-label="Link temporário de envio" readOnly value={activeLink.url}/><button className="button button-secondary task-action-button" onClick={() => void handleCopyUploadLink(activeLink.url)}>Copiar</button><button className="text-button task-cancel-button" onClick={() => void handleRevokeUploadLink(task.id)} disabled={taskLinkBusy === task.id}>Revogar</button></div><small>Expira em {formatDateTime(activeLink.expires_at)} · até 5 arquivos.</small></div>}
-                            {taskDocuments.length === 0 ? <p className="task-no-documents">Nenhum arquivo recebido ainda.</p> : <div className="task-document-list">{taskDocuments.map(document => <div className="task-document-row" key={document.id}><div className="task-document-info"><strong>{document.original_filename}</strong><small>{fileSizeLabel(document.file_size)} · {documentReviewLabels[document.review_status]} · {formatDateTime(document.created_at)}</small>{document.review_note && <p>{document.review_note}</p>}</div><button className="button button-secondary task-action-button" onClick={() => void handleDownloadDocument(document.id, document.original_filename)}><Download size={13}/> Baixar</button>{canEditTasks && document.review_status === "pending" && <><button className="text-button task-document-accept" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "accepted")}>Conferido</button><button className="text-button task-cancel-button" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "rejected")}>Pedir correção</button></>}</div>)}</div>}
+                            {taskDocuments.length === 0 ? <p className="task-no-documents">Nenhum arquivo recebido ainda.</p> : <div className="task-document-list">{taskDocuments.map(document => <div className="task-document-row" key={document.id}><div className="task-document-info"><strong>{document.original_filename}</strong><small>{fileSizeLabel(document.file_size)} · {documentScanLabels[document.scan_status]} · {documentReviewLabels[document.review_status]} · {formatDateTime(document.created_at)}</small>{document.review_note && <p>{document.review_note}</p>}</div><button className="button button-secondary task-action-button" disabled={document.scan_status !== "clean"} title={document.scan_status !== "clean" ? "O arquivo só pode ser baixado após a análise antimalware." : "Baixar arquivo verificado"} onClick={() => void handleDownloadDocument(document.id, document.original_filename)}><Download size={13}/> {document.scan_status === "clean" ? "Baixar" : "Bloqueado"}</button>{canEditTasks && document.scan_status === "error" && ["owner", "admin"].includes(me?.user.role ?? "") && <button className="text-button" disabled={taskBusy} onClick={() => void handleRetryDocumentScan(document.id)}>Tentar análise novamente</button>}{canEditTasks && document.scan_status === "clean" && document.review_status === "pending" && <><button className="text-button task-document-accept" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "accepted")}>Conferido</button><button className="text-button task-cancel-button" disabled={taskBusy} onClick={() => void handleReviewDocument(document.id, "rejected")}>Pedir correção</button></>}</div>)}</div>}
                           </div>;
                         })()}
                       </article>;
