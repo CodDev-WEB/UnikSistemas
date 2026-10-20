@@ -179,8 +179,11 @@ export default function App() {
     setImportBusy(true);
     setError("");
     setSuccess("");
-    setImportBatch(null);
     try {
+      if (importBatch && importBatch.status !== "confirmed") {
+        await api<unknown>(`/api/v1/imports/clients/${importBatch.id}`, { method: "DELETE" }, token);
+      }
+      setImportBatch(null);
       const body = new FormData();
       body.append("file", importFile);
       const preview = await api<ImportBatch>("/api/v1/imports/clients/preview", {
@@ -214,9 +217,32 @@ export default function App() {
       setClients(updatedClients);
       setSuccess(`${confirmed.imported_count} cliente(s) importado(s) com sucesso.`);
     } catch (err) {
+      try {
+        const latest = await api<ImportBatch>(`/api/v1/imports/clients/${importBatch.id}`, {}, token);
+        setImportBatch(latest);
+      } catch {
+        // Keep the original error when the status endpoint is also unavailable.
+      }
       setError(err instanceof Error ? err.message : "Não foi possível confirmar a importação.");
     } finally {
       setConfirmImportBusy(false);
+    }
+  }
+
+  async function handleDiscardImport() {
+    if (!token || !importBatch || importBatch.status === "confirmed") return;
+    setImportBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api<unknown>(`/api/v1/imports/clients/${importBatch.id}`, { method: "DELETE" }, token);
+      setImportBatch(null);
+      setImportFile(null);
+      setSuccess("Prévia descartada. Nenhum cliente foi importado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível descartar a prévia.");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -398,7 +424,7 @@ export default function App() {
                 <div className="card-heading"><div><h2>Clientes recentes</h2><p>Um panorama dos últimos cadastros do escritório.</p></div><button className="text-button" onClick={() => setCurrentPage("clients")}>Ver todos <ArrowRight size={15}/></button></div>
                 {clients.length === 0 ? <EmptyClients onAdd={() => {setCurrentPage("clients");setShowCreate(true);}} /> : <ClientTable clients={clients.slice(0,5)} onOpen={() => setCurrentPage("clients")} />}
               </section>
-              <section className="next-step-card"><div className="next-step-icon"><Activity size={20}/></div><div><span className="next-step-label">PRÓXIMA ETAPA</span><h3>Organize a base de atendimento</h3><p>Cadastre as empresas atendidas pelo escritório. Importações e acompanhamento de pendências serão adicionados nas próximas entregas.</p></div><button className="button button-secondary" onClick={() => setCurrentPage("clients")}>Abrir clientes <ArrowRight size={16}/></button></section>
+              <section className="next-step-card"><div className="next-step-icon"><Activity size={20}/></div><div><span className="next-step-label">PRÓXIMA ETAPA</span><h3>Organize a base de atendimento</h3><p>Cadastre empresas manualmente ou importe uma planilha com prévia e validação. Acompanhamento de pendências será adicionado em uma próxima etapa.</p></div><button className="button button-secondary" onClick={() => setCurrentPage("clients")}>Abrir clientes <ArrowRight size={16}/></button></section>
             </>
           ) : currentPage === "clients" ? (
             <>
@@ -473,7 +499,8 @@ export default function App() {
                       id="client-import-file"
                       type="file"
                       accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                      onChange={event => { setImportFile(event.target.files?.[0] ?? null); setImportBatch(null); setError(""); setSuccess(""); }}
+                      onChange={event => { setImportFile(event.target.files?.[0] ?? null); setError(""); setSuccess(""); }}
+                      disabled={importBusy || confirmImportBusy}
                       required
                     />
                   </label>
@@ -495,13 +522,13 @@ export default function App() {
                   <div className="card-heading import-preview-heading">
                     <div>
                       <h2>Prévia e validação</h2>
-                      <p>{importBatch.total_rows} linha(s) analisada(s). {importBatch.status === "ready" ? "Nenhuma pendência encontrada." : importBatch.status === "confirmed" ? "Importação concluída." : "Há linhas que precisam de correção."}</p>
+                      <p><strong>{importBatch.filename}</strong> · {importBatch.total_rows} linha(s) analisada(s). {importBatch.status === "ready" ? "Nenhuma pendência encontrada." : importBatch.status === "confirmed" ? "Importação concluída." : "Há linhas que precisam de correção."}</p>
                     </div>
                     <span className={importBatch.status === "invalid" ? "status-pill status-archived" : "status-pill status-active"}>
                       <i/>{importBatch.status === "ready" ? "Pronta para confirmar" : importBatch.status === "confirmed" ? "Confirmada" : "Com pendências"}
                     </span>
                   </div>
-                  <div className="import-preview-scroll">
+                  {importBatch.status !== "confirmed" && <div className="import-preview-scroll">
                     <table className="import-preview-table">
                       <thead><tr><th>Linha</th><th>Razão social</th><th>Nome fantasia</th><th>CNPJ/CPF</th><th>E-mail</th><th>Telefone</th><th>Situação</th><th>Validação</th></tr></thead>
                       <tbody>{importBatch.rows.map(row => (
@@ -511,14 +538,17 @@ export default function App() {
                         </tr>
                       ))}</tbody>
                     </table>
-                  </div>
+                  </div>}
                   <div className="import-confirm-footer">
                     <p>{importBatch.status === "invalid" ? "Nenhum dado foi gravado. Corrija as linhas sinalizadas no arquivo original e envie novamente." : importBatch.status === "confirmed" ? `${importBatch.imported_count} cliente(s) foram adicionados à base deste escritório.` : "Confira as informações acima. Só depois de confirmar os clientes serão gravados."}</p>
-                    {importBatch.status === "ready" && <button className="button button-primary" onClick={() => void handleConfirmImport()} disabled={confirmImportBusy}>{confirmImportBusy ? "Importando..." : `Confirmar e importar ${importBatch.total_rows} cliente(s)`} {!confirmImportBusy && <Check size={16}/>}</button>}
+                    {importBatch.status !== "confirmed" && <div className="import-preview-actions">
+                      <button className="button button-secondary" onClick={() => void handleDiscardImport()} disabled={importBusy || confirmImportBusy}>Descartar prévia</button>
+                      {importBatch.status === "ready" && <button className="button button-primary" onClick={() => void handleConfirmImport()} disabled={confirmImportBusy || importBusy}>{confirmImportBusy ? "Importando..." : `Confirmar e importar ${importBatch.total_rows} cliente(s)`} {!confirmImportBusy && <Check size={16}/>}</button>}
+                    </div>}
                   </div>
                 </section>
               )}
-              <p className="permissions-note"><LockKeyhole size={14}/> Os dados são validados no servidor e vinculados ao escritório da sessão. Arquivos enviados não são armazenados; fica salva apenas a prévia normalizada até a confirmação.</p>
+              <p className="permissions-note"><LockKeyhole size={14}/> Os dados são validados no servidor e vinculados ao escritório da sessão. O arquivo original não é armazenado; a prévia normalizada pode ser descartada e é apagada após a confirmação.</p>
             </>
           )}
           <footer className="page-footer"><span>© 2026 UnikSistemas</span><span>GESTÃO CONTÁBIL · VERSÃO 0.1.0</span></footer>
