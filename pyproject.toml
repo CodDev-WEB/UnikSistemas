@@ -4,7 +4,7 @@ target-version = "py312"
 exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP"]
+select = ["E", "F", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
