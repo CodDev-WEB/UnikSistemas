@@ -1220,7 +1220,7 @@ async def upload_public_document(
                     event_key=f"document_received:{document.id}",
                     event_type="document_received",
                     title="Documento recebido",
-                    message=f'O arquivo “{clean_name}” foi enviado para a pendência “{task.title}” do cliente.',
+                    message=f'O arquivo “{clean_name}” foi recebido para a pendência “{task.title}” e aguarda análise antimalware antes de ser liberado.',
                     entity_type="client_document",
                     entity_id=document.id,
                     action_url="/tasks",
