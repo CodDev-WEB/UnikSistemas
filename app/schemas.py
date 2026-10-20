@@ -288,7 +288,9 @@ class ClientDocumentReviewUpdate(BaseModel):
 
 class NotificationRead(BaseModel):
     id: str
-    event_type: Literal["document_received", "task_assigned", "task_due"]
+    event_type: Literal[
+        "document_received", "task_assigned", "task_due", "antivirus_alert", "antivirus_recovered"
+    ]
     title: str
     message: str
     entity_type: str
