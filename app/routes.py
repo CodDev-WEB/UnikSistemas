@@ -1480,6 +1480,7 @@ def get_antivirus_status(
     pending = int(
         db.scalar(
             select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
                 ClientDocument.scan_status.in_(("pending", "scanning"))
             )
         )
@@ -1487,13 +1488,17 @@ def get_antivirus_status(
     )
     failed = int(
         db.scalar(
-            select(func.count(ClientDocument.id)).where(ClientDocument.scan_status == "error")
+            select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
+                ClientDocument.scan_status == "error",
+            )
         )
         or 0
     )
     infected_quarantine = int(
         db.scalar(
             select(func.count(ClientDocument.id)).where(
+                ClientDocument.tenant_id == current_user.tenant_id,
                 ClientDocument.scan_status == "infected",
                 ClientDocument.quarantine_purged_at.is_(None),
             )
