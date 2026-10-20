@@ -184,7 +184,10 @@ class ClientTaskCreate(BaseModel):
     @field_validator("title")
     @classmethod
     def normalize_title(cls, value: str) -> str:
-        return value.strip()
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Informe uma descrição com pelo menos dois caracteres.")
+        return cleaned
 
     @field_validator("description")
     @classmethod
@@ -206,7 +209,12 @@ class ClientTaskUpdate(BaseModel):
     @field_validator("title")
     @classmethod
     def normalize_updated_title(cls, value: str | None) -> str | None:
-        return value.strip() if value is not None else None
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Informe uma descrição com pelo menos dois caracteres.")
+        return cleaned
 
     @field_validator("description")
     @classmethod
