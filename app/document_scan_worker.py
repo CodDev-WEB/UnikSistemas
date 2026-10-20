@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
