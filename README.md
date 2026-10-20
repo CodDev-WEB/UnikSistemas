@@ -14,7 +14,8 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Cadastro, listagem e consulta de clientes isolados por tenant.
 - Gestão de equipe: criar usuários, consultar a equipe, alterar papéis e ativar/desativar acessos.
 - Perfis iniciais: responsável, administrador, contador(a), assistente e consulta (somente leitura).
-- Importação assistida de clientes por CSV/XLSX, com prévia, validação, detecção de duplicidades e confirmação explícita.\n- Auditoria inicial para criação de clientes, importações confirmadas e alterações de usuários.
+- Importação assistida de clientes por CSV/XLSX, com prévia, validação, detecção de duplicidades e confirmação explícita.
+- Auditoria inicial para criação de clientes, importações confirmadas e alterações de usuários.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
@@ -85,9 +86,8 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 
 ## Funcionalidades ainda não implementadas
 
-- Gestão completa de usuários, equipes, perfis e permissões.
+- Convites por e-mail, recuperação de senha e MFA.
 - Recuperação de senha e MFA.
-- Importação de planilhas com prévia/validação e relatório de erros.
 - Gestão documental, pendências e rotinas contábeis.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
