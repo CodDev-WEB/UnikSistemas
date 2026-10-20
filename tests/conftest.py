@@ -26,7 +26,8 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
         database_url="sqlite://",
         bootstrap_token="test-bootstrap-token-with-more-than-thirty-two",
         access_token_expire_minutes=30,
-        cors_origins=[],\n        document_storage_path=str(tmp_path / "uploads"),
+        cors_origins=[],
+        document_storage_path=str(tmp_path / "uploads"),
     )
 
     def override_get_db():
