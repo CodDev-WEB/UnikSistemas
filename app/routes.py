@@ -1,7 +1,8 @@
 import hashlib
 import re
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session, aliased
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow
+from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Notification, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
@@ -31,6 +32,7 @@ from app.schemas import (
     ClientDocumentReviewUpdate,
     DocumentUploadLinkRead,
     PublicDocumentUploadInfo,
+    NotificationRead,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -41,6 +43,7 @@ from app.schemas import (
     UserRead,
 )
 from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.notifications import enqueue_due_reminders, notification_email_is_ready, notification_queue_counts, queue_notification
 from app.document_storage import (
     ALLOWED_EXTENSIONS, LINK_LIFETIME_DAYS, MAX_DOCUMENT_BYTES, MAX_UPLOADS_PER_LINK,
     load_document, remove_stored_document, store_document, validate_uploaded_document,
@@ -823,7 +826,7 @@ def create_client_task(
         raise HTTPException(status_code=404, detail="Cliente não encontrado neste escritório.")
 
     assignee_id = payload.assigned_to_user_id or current_user.id
-    _validate_task_assignment(db, assignee_id, current_user.tenant_id)
+    assigned_user = _validate_task_assignment(db, assignee_id, current_user.tenant_id)
     task = ClientTask(
         tenant_id=current_user.tenant_id,
         client_id=target_client.id,
@@ -839,6 +842,19 @@ def create_client_task(
     try:
         db.add(task)
         db.flush()
+        if assigned_user is not None and assigned_user.id != current_user.id:
+            queue_notification(
+                db,
+                tenant_id=current_user.tenant_id,
+                recipient_user_id=assigned_user.id,
+                event_key=f"task_assigned:{task.id}",
+                event_type="task_assigned",
+                title="Nova pendência atribuída",
+                message=f"A pendência “{task.title}” foi atribuída a você para o cliente {target_client.legal_name}.",
+                entity_type="client_task",
+                entity_id=task.id,
+                action_url="/tasks",
+            )
         db.add(
             AuditLog(
                 tenant_id=current_user.tenant_id,
@@ -883,8 +899,10 @@ def update_client_task(
     if any(value is None and field not in nullable_fields for field, value in changes.items()):
         raise HTTPException(status_code=422, detail="Campos obrigatórios não podem ser nulos.")
 
+    new_assignee = None
     if "assigned_to_user_id" in changes and changes["assigned_to_user_id"] is not None:
-        _validate_task_assignment(db, changes["assigned_to_user_id"], current_user.tenant_id)
+        new_assignee = _validate_task_assignment(db, changes["assigned_to_user_id"], current_user.tenant_id)
+    previous_assignee_id = task.assigned_to_user_id
 
     previous_status = task.status
     previous_due_date = task.due_date
@@ -895,6 +913,24 @@ def update_client_task(
         task.completed_at = utcnow() if changes["status"] == "completed" else None
 
     try:
+        if (
+            "assigned_to_user_id" in changes
+            and task.assigned_to_user_id != previous_assignee_id
+            and new_assignee is not None
+            and new_assignee.id != current_user.id
+        ):
+            queue_notification(
+                db,
+                tenant_id=current_user.tenant_id,
+                recipient_user_id=new_assignee.id,
+                event_key=f"task_assigned:{task.id}:{new_assignee.id}:{task.updated_at.isoformat()}",
+                event_type="task_assigned",
+                title="Nova pendência atribuída",
+                message=f"A pendência “{task.title}” foi atribuída a você.",
+                entity_type="client_task",
+                entity_id=task.id,
+                action_url="/tasks",
+            )
         db.add(
             AuditLog(
                 tenant_id=current_user.tenant_id,
@@ -1163,6 +1199,28 @@ async def upload_public_document(
     try:
         # Assign the ORM-generated document ID before writing the audit event.
         db.flush()
+        recipient_ids = {user_id for user_id in (task.assigned_to_user_id, task.created_by_user_id) if user_id}
+        for recipient_id in recipient_ids:
+            recipient = db.scalar(
+                select(User).where(
+                    User.id == recipient_id,
+                    User.tenant_id == link.tenant_id,
+                    User.is_active.is_(True),
+                )
+            )
+            if recipient is not None:
+                queue_notification(
+                    db,
+                    tenant_id=link.tenant_id,
+                    recipient_user_id=recipient.id,
+                    event_key=f"document_received:{document.id}",
+                    event_type="document_received",
+                    title="Documento recebido",
+                    message=f'O arquivo “{clean_name}” foi enviado para a pendência “{task.title}” do cliente.',
+                    entity_type="client_document",
+                    entity_id=document.id,
+                    action_url="/tasks",
+                )
         db.add(
             AuditLog(
                 tenant_id=link.tenant_id,
@@ -1307,3 +1365,191 @@ def review_client_document(
         )
     ).one()
     return _serialize_document_record(record)
+
+
+def _serialize_notification(notification: Notification) -> dict:
+    return {
+        "id": notification.id,
+        "event_type": notification.event_type,
+        "title": notification.title,
+        "message": notification.message,
+        "entity_type": notification.entity_type,
+        "entity_id": notification.entity_id,
+        "action_url": notification.action_url,
+        "is_read": notification.is_read,
+        "email_status": notification.email_status,
+        "email_attempts": notification.email_attempts,
+        "email_sent_at": notification.email_sent_at.isoformat() if notification.email_sent_at else None,
+        "created_at": notification.created_at.isoformat() if notification.created_at else None,
+    }
+
+
+def _require_notification_manager(user: User) -> None:
+    if user.role not in {"owner", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas o responsável ou administrador pode consultar e gerenciar a fila de e-mails.",
+        )
+
+
+@router.get(
+    "/notifications",
+    response_model=list[NotificationRead],
+    tags=["Notifications"],
+)
+def list_notifications(
+    unread_only: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    statement = select(Notification).where(
+        Notification.tenant_id == current_user.tenant_id,
+        Notification.recipient_user_id == current_user.id,
+    )
+    if unread_only:
+        statement = statement.where(Notification.is_read.is_(False))
+    rows = db.scalars(
+        statement.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit)
+    ).all()
+    return [_serialize_notification(row) for row in rows]
+
+
+@router.patch(
+    "/notifications/{notification_id}/read",
+    response_model=NotificationRead,
+    tags=["Notifications"],
+)
+def mark_notification_read(
+    notification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    notification = db.scalar(
+        select(Notification).where(
+            Notification.id == notification_id,
+            Notification.tenant_id == current_user.tenant_id,
+            Notification.recipient_user_id == current_user.id,
+        )
+    )
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada.")
+    if not notification.is_read:
+        notification.is_read = True
+        notification.read_at = utcnow()
+        db.commit()
+        db.refresh(notification)
+    return _serialize_notification(notification)
+
+
+@router.post("/notifications/read-all", tags=["Notifications"])
+def mark_all_notifications_read(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    notifications = db.scalars(
+        select(Notification).where(
+            Notification.tenant_id == current_user.tenant_id,
+            Notification.recipient_user_id == current_user.id,
+            Notification.is_read.is_(False),
+        )
+    ).all()
+    now = utcnow()
+    for notification in notifications:
+        notification.is_read = True
+        notification.read_at = now
+    db.commit()
+    return {"marked_read": len(notifications)}
+
+
+@router.get("/notifications/email-status", tags=["Notifications"])
+def get_notification_email_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    _require_notification_manager(current_user)
+    counts = notification_queue_counts(db, current_user.tenant_id)
+    return {
+        "enabled": settings.email_notifications_enabled,
+        "configured": notification_email_is_ready(settings),
+        "pending": counts["pending"],
+        "failed": counts["failed"],
+        "note": (
+            "O worker tenta enviar a fila automaticamente."
+            if notification_email_is_ready(settings)
+            else "SMTP está desativado; notificações permanecem na caixa interna e a fila de e-mail não será enviada."
+        ),
+    }
+
+
+@router.post("/notifications/process-due-reminders", tags=["Notifications"])
+def process_due_reminders_now(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    _require_notification_manager(current_user)
+    try:
+        today = datetime.now(ZoneInfo(settings.notification_timezone)).date()
+    except ZoneInfoNotFoundError:
+        raise HTTPException(status_code=500, detail="Fuso horário de notificações inválido.") from None
+    result = enqueue_due_reminders(db, today, days_ahead=1, tenant_id=current_user.tenant_id)
+    db.commit()
+    counts = notification_queue_counts(db, current_user.tenant_id)
+    return {
+        "created": result["created"],
+        "due_items_checked": result["checked"],
+        "email_enabled": notification_email_is_ready(settings),
+        "queued_email_count": counts["pending"],
+        "failed_email_count": counts["failed"],
+    }
+
+
+@router.post("/notifications/{notification_id}/retry-email", tags=["Notifications"])
+def retry_notification_email(
+    notification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    _require_notification_manager(current_user)
+    if not notification_email_is_ready(settings):
+        raise HTTPException(status_code=409, detail="Configure SMTP e habilite o envio de e-mails antes de tentar novamente.")
+    notification = db.scalar(
+        select(Notification).where(
+            Notification.id == notification_id,
+            Notification.tenant_id == current_user.tenant_id,
+        )
+    )
+    if notification is None:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada neste escritório.")
+    if notification.email_status == "sent":
+        raise HTTPException(status_code=409, detail="Este e-mail já foi enviado.")
+    notification.email_status = "pending"
+    notification.email_last_error = None
+    db.commit()
+    return {"queued": True, "id": notification.id}
+
+
+
+@router.post("/notifications/retry-failed-emails", tags=["Notifications"])
+def retry_failed_notification_emails(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    _require_notification_manager(current_user)
+    if not notification_email_is_ready(settings):
+        raise HTTPException(status_code=409, detail="Configure SMTP e habilite o envio de e-mails antes de tentar novamente.")
+    failed = db.scalars(
+        select(Notification).where(
+            Notification.tenant_id == current_user.tenant_id,
+            Notification.email_status == "failed",
+        )
+    ).all()
+    for notification in failed:
+        notification.email_status = "pending"
+        notification.email_last_error = None
+    db.commit()
+    return {"queued": len(failed)}
