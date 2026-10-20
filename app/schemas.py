@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -168,3 +169,65 @@ class ClientImportHistoryRead(BaseModel):
     created_by_name: str | None = None
     created_at: str | None = None
     confirmed_at: str | None = None
+
+
+
+class ClientTaskCreate(BaseModel):
+    client_id: str = Field(min_length=1, max_length=36)
+    title: str = Field(min_length=2, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    kind: Literal["document", "follow_up", "routine"] = "document"
+    priority: Literal["low", "normal", "high"] = "normal"
+    due_date: date | None = None
+    assigned_to_user_id: str | None = Field(default=None, max_length=36)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class ClientTaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    kind: Literal["document", "follow_up", "routine"] | None = None
+    priority: Literal["low", "normal", "high"] | None = None
+    due_date: date | None = None
+    assigned_to_user_id: str | None = Field(default=None, max_length=36)
+    status: Literal["open", "received", "completed", "cancelled"] | None = None
+
+    @field_validator("title")
+    @classmethod
+    def normalize_updated_title(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("description")
+    @classmethod
+    def normalize_updated_description(cls, value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+
+class ClientTaskRead(BaseModel):
+    id: str
+    client_id: str
+    client_name: str
+    title: str
+    description: str | None = None
+    kind: Literal["document", "follow_up", "routine"]
+    priority: Literal["low", "normal", "high"]
+    status: Literal["open", "received", "completed", "cancelled"]
+    due_date: date | None = None
+    assigned_to_user_id: str | None = None
+    assigned_to_name: str | None = None
+    created_by_user_id: str | None = None
+    created_by_name: str | None = None
+    completed_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
