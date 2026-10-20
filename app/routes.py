@@ -490,8 +490,7 @@ def download_client_import_csv_template(
     """Download a minimal CSV template for client imports."""
     _require_client_editor(current_user)
     content = (
-        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r
-"
+        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
     )
     return Response(
         content=content.encode("utf-8"),
