@@ -66,9 +66,9 @@ def query_clamd(command: bytes, host: str, port: int, timeout: int) -> str:
     try:
         with socket.create_connection((host, port), timeout=timeout) as client:
             client.settimeout(timeout)
-            client.sendall(b"z" + command + b"\\0")
+            client.sendall(b"z" + command + b"\0")
             response = bytearray()
-            while b"\\0" not in response and b"\\n" not in response:
+            while b"\0" not in response and b"\n" not in response:
                 chunk = client.recv(1024)
                 if not chunk:
                     raise AntivirusError("O ClamAV encerrou a conexão antes de responder.")
@@ -79,7 +79,7 @@ def query_clamd(command: bytes, host: str, port: int, timeout: int) -> str:
         raise
     except OSError as exc:
         raise AntivirusError("Não foi possível consultar o ClamAV.") from exc
-    reply = response.decode("utf-8", errors="replace").rstrip("\\0\\r\\n")
+    reply = response.decode("utf-8", errors="replace").rstrip("\0\r\n")
     if not reply or "ERROR" in reply.upper() or "COMMAND UNAVAILABLE" in reply.upper():
         raise AntivirusError("O ClamAV não retornou uma resposta de estado válida.")
     return reply
@@ -88,7 +88,7 @@ def query_clamd(command: bytes, host: str, port: int, timeout: int) -> str:
 def parse_clamd_version(reply: str) -> ClamAVInfo:
     """Parse clamd VERSION output: engine/db-version/database-build-date."""
     match = re.fullmatch(
-        r"ClamAV\\s+([^/\\s]+)/([0-9]+)/([A-Za-z]{3} [A-Za-z]{3} +[0-9]{1,2} "
+        r"ClamAV\s+([^/\s]+)/([0-9]+)/([A-Za-z]{3} [A-Za-z]{3} +[0-9]{1,2} "
         r"[0-9]{2}:[0-9]{2}:[0-9]{2} [0-9]{4})",
         reply.strip(),
     )
