@@ -188,6 +188,13 @@ class ClientDocument(Base):
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     review_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    scan_status: Mapped[str] = mapped_column(
+        String(20), default="pending", server_default="pending", nullable=False
+    )
+    scan_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    scan_last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     review_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     reviewed_by_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
