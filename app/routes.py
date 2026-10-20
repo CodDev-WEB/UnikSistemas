@@ -1609,10 +1609,17 @@ def get_notification_email_status(
         "configured": notification_email_is_ready(settings),
         "pending": counts["pending"],
         "failed": counts["failed"],
+        "expired": counts["expired"],
+        "max_queue_age_hours": settings.email_queue_max_age_hours,
         "note": (
-            "O worker tenta enviar a fila automaticamente."
+            f"O worker envia automaticamente apenas mensagens na fila há até {settings.email_queue_max_age_hours} horas. "
+            "Mensagens mais antigas expiram e exigem reenvio explícito por um responsável."
             if notification_email_is_ready(settings)
-            else "SMTP está desativado; notificações permanecem na caixa interna e a fila de e-mail não será enviada."
+            else (
+                "SMTP está desativado; notificações permanecem na caixa interna. "
+                f"Ao habilitar, só serão enviadas automaticamente mensagens enfileiradas há até "
+                f"{settings.email_queue_max_age_hours} horas; mensagens antigas exigem reenvio explícito."
+            )
         ),
     }
 
@@ -1661,7 +1668,18 @@ def retry_notification_email(
     if notification.email_status == "sent":
         raise HTTPException(status_code=409, detail="Este e-mail já foi enviado.")
     notification.email_status = "pending"
+    notification.email_queued_at = utcnow()
     notification.email_last_error = None
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="notification.email_retry_requested",
+            entity_type="notification",
+            entity_id=notification.id,
+            details={"reason": "explicit_manual_retry"},
+        )
+    )
     db.commit()
     return {"queued": True, "id": notification.id}
 
@@ -1684,6 +1702,17 @@ def retry_failed_notification_emails(
     ).all()
     for notification in failed:
         notification.email_status = "pending"
+        notification.email_queued_at = utcnow()
         notification.email_last_error = None
+        db.add(
+            AuditLog(
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="notification.email_retry_requested",
+                entity_type="notification",
+                entity_id=notification.id,
+                details={"reason": "explicit_manual_retry_all"},
+            )
+        )
     db.commit()
     return {"queued": len(failed)}
