@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     bootstrap_token: str | None = None
     access_token_expire_minutes: int = Field(default=60, ge=5, le=1440)
     cors_origins: list[str] = Field(default_factory=list)
+    document_storage_path: str = "/var/lib/unik/uploads"
 
     @model_validator(mode="after")
     def validate_production_secrets(self):
