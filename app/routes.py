@@ -1,7 +1,7 @@
 import hashlib
 import re
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from io import BytesIO
@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, aliased
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow
+from app.models import AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Notification, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
