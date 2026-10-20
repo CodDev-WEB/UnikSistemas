@@ -276,3 +276,159 @@ def test_user_management_is_scoped_to_authenticated_tenant(client: TestClient):
         json={"is_active": False},
     )
     assert update_foreign.status_code == 404
+
+
+
+def test_client_import_preview_requires_confirmation_and_imports_atomically(client: TestClient):
+    provision(client, "importacao", "owner@example.com")
+    token = login(client, "importacao", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    csv_content = (
+        "Razão Social;Nome Fantasia;CNPJ;E-mail;Telefone;Status\n"
+        "Empresa Importada LTDA;Empresa Importada;12.345.678/0001-99;"
+        "contato@importada.com.br;(93) 99999-0000;Ativo\n"
+    )
+    preview = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers,
+        files={"file": ("clientes.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+    assert preview.status_code == 201, preview.text
+    batch = preview.json()
+    assert batch["status"] == "ready"
+    assert batch["total_rows"] == 1
+    assert batch["rows"][0]["legal_name"] == "Empresa Importada LTDA"
+
+    # Preview is non-destructive until the user makes an explicit confirmation.
+    assert client.get("/api/v1/clients", headers=headers).json() == []
+
+    confirmed = client.post(
+        f"/api/v1/imports/clients/{batch['id']}/confirm",
+        headers=headers,
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
+    assert confirmed.json()["imported_count"] == 1
+    clients = client.get("/api/v1/clients", headers=headers).json()
+    assert len(clients) == 1
+    assert clients[0]["legal_name"] == "Empresa Importada LTDA"
+
+    repeated = client.post(
+        f"/api/v1/imports/clients/{batch['id']}/confirm",
+        headers=headers,
+    )
+    assert repeated.status_code == 409
+
+
+def test_invalid_client_import_is_blocked_and_reports_rows(client: TestClient):
+    provision(client, "importacao-invalida", "owner@example.com")
+    token = login(client, "importacao-invalida", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    csv_content = (
+        "Razão Social;CNPJ;E-mail\n"
+        "Empresa Válida LTDA;11.111.111/0001-11;email-invalido\n"
+        "Empresa Duplicada LTDA;11.111.111/0001-11;outro@example.com\n"
+    )
+    preview = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers,
+        files={"file": ("clientes.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+    assert preview.status_code == 201, preview.text
+    batch = preview.json()
+    assert batch["status"] == "invalid"
+    assert any("E-mail inválido" in error for error in batch["rows"][0]["errors"])
+    assert any("duplicado dentro do arquivo" in error for error in batch["rows"][1]["errors"])
+
+    confirmed = client.post(
+        f"/api/v1/imports/clients/{batch['id']}/confirm",
+        headers=headers,
+    )
+    assert confirmed.status_code == 409
+    assert client.get("/api/v1/clients", headers=headers).json() == []
+
+
+def test_client_import_supports_xlsx(client: TestClient):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    provision(client, "importacao-xlsx", "owner@example.com")
+    token = login(client, "importacao-xlsx", "owner@example.com")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Razão Social", "Nome Fantasia", "CNPJ", "E-mail"])
+    sheet.append(["Planilha Exemplo LTDA", "Planilha Exemplo", "22.222.222/0001-22", "xlsx@example.com"])
+    content = BytesIO()
+    workbook.save(content)
+
+    response = client.post(
+        "/api/v1/imports/clients/preview",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "file": (
+                "clientes.xlsx",
+                content.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "ready"
+    assert response.json()["rows"][0]["email"] == "xlsx@example.com"
+
+
+def test_client_import_is_scoped_to_tenant_and_rejects_viewer(client: TestClient):
+    provision(client, "importacao-a", "owner-a@example.com")
+    token_a = login(client, "importacao-a", "owner-a@example.com")
+    uploaded = client.post(
+        "/api/v1/imports/clients/preview",
+        headers={"Authorization": f"Bearer {token_a}"},
+        files={
+            "file": (
+                "clientes.csv",
+                b"Razao Social;CNPJ\nEmpresa do A;33.333.333/0001-33\n",
+                "text/csv",
+            )
+        },
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    batch_id = uploaded.json()["id"]
+
+    provision(client, "importacao-b", "owner-b@example.com")
+    token_b = login(client, "importacao-b", "owner-b@example.com")
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    assert client.get(f"/api/v1/imports/clients/{batch_id}", headers=headers_b).status_code == 404
+    assert client.post(
+        f"/api/v1/imports/clients/{batch_id}/confirm", headers=headers_b
+    ).status_code == 404
+
+    owner_token = login(client, "importacao-a", "owner-a@example.com")
+    create_user(client, owner_token, "consulta@example.com", "viewer")
+    viewer_token = login(client, "importacao-a", "consulta@example.com")
+    denied = client.post(
+        "/api/v1/imports/clients/preview",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+        files={"file": ("clientes.csv", b"Razao Social\nEmpresa\n", "text/csv")},
+    )
+    assert denied.status_code == 403
+
+
+def test_client_import_rejects_unsupported_or_empty_files(client: TestClient):
+    provision(client, "importacao-formato", "owner@example.com")
+    token = login(client, "importacao-formato", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    unsupported = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers,
+        files={"file": ("clientes.xls", b"not xlsx", "application/octet-stream")},
+    )
+    assert unsupported.status_code == 422
+
+    empty_rows = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers,
+        files={"file": ("clientes.csv", b"Razao Social;CNPJ\n", "text/csv")},
+    )
+    assert empty_rows.status_code == 422
