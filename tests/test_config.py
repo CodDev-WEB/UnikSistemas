@@ -79,3 +79,13 @@ def test_production_accepts_strong_postgresql_settings():
     )
     assert settings.app_env == "production"
     assert settings.database_url.startswith("postgresql+psycopg://")
+
+
+def test_email_queue_max_age_defaults_to_one_day_and_has_bounds():
+    assert make_settings().email_queue_max_age_hours == 24
+    assert make_settings(email_queue_max_age_hours=168).email_queue_max_age_hours == 168
+
+    with pytest.raises(ValidationError):
+        make_settings(email_queue_max_age_hours=0)
+    with pytest.raises(ValidationError):
+        make_settings(email_queue_max_age_hours=721)
