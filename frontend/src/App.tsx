@@ -13,11 +13,21 @@ type Client = {
   created_at: string | null;
 };
 type Me = { user: User; tenant: Tenant };
+type ImportRow = {
+  row_number: number; legal_name: string | null; trade_name: string | null;
+  tax_id: string | null; email: string | null; phone: string | null;
+  status: string | null; errors: string[];
+};
+type ImportBatch = {
+  id: string; filename: string; status: "ready" | "invalid" | "confirmed";
+  total_rows: number; imported_count: number; rows: ImportRow[];
+  created_at: string | null; confirmed_at: string | null;
+};
 type TokenResponse = { access_token: string; token_type: string; expires_in: number };
 
 async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(path, { ...init, headers });
   const payload = await response.json().catch(() => ({}));
@@ -43,7 +53,9 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users">("dashboard");
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports">("dashboard");
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importBatch, setImportBatch] = useState<ImportBatch | null>(null);
   const [loginForm, setLoginForm] = useState({ tenant_slug: "", email: "", password: "" });
   const [clientForm, setClientForm] = useState({ legal_name: "", trade_name: "", tax_id: "", email: "", phone: "" });
   const [userForm, setUserForm] = useState({ full_name: "", email: "", password: "", role: "accountant" });
@@ -53,6 +65,8 @@ export default function App() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [clientBusy, setClientBusy] = useState(false);
   const [userBusy, setUserBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [confirmImportBusy, setConfirmImportBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -152,6 +166,53 @@ export default function App() {
   }
 
 
+
+  async function handlePreviewImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !importFile) return;
+    setImportBusy(true);
+    setError("");
+    setSuccess("");
+    setImportBatch(null);
+    try {
+      const body = new FormData();
+      body.append("file", importFile);
+      const preview = await api<ImportBatch>("/api/v1/imports/clients/preview", {
+        method: "POST",
+        body,
+      }, token);
+      setImportBatch(preview);
+      setSuccess(preview.status === "ready"
+        ? "Prévia validada. Confira os dados e confirme para gravar os clientes."
+        : "A prévia encontrou pendências. Corrija o arquivo e envie novamente.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível validar a planilha.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function handleConfirmImport() {
+    if (!token || !importBatch || importBatch.status !== "ready") return;
+    setConfirmImportBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const confirmed = await api<ImportBatch>(
+        `/api/v1/imports/clients/${importBatch.id}/confirm`,
+        { method: "POST" },
+        token,
+      );
+      setImportBatch(confirmed);
+      const updatedClients = await api<Client[]>("/api/v1/clients?limit=100", {}, token);
+      setClients(updatedClients);
+      setSuccess(`${confirmed.imported_count} cliente(s) importado(s) com sucesso.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível confirmar a importação.");
+    } finally {
+      setConfirmImportBusy(false);
+    }
+  }
 
   async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -265,6 +326,7 @@ export default function App() {
   const activeClients = clients.filter(c => c.status === "active").length;
   const archivedClients = clients.filter(c => c.status === "archived").length;
   const canManageUsers = ["owner", "admin"].includes(me.user.role);
+  const canImportClients = ["owner", "admin", "accountant", "assistant"].includes(me.user.role);
   const roleLabels: Record<string, string> = {
     owner: "Responsável",
     admin: "Administrador",
@@ -291,7 +353,7 @@ export default function App() {
           <button className={currentPage === "dashboard" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("dashboard")}><LayoutDashboard size={18} /><span>Visão geral</span></button>
           <button className={currentPage === "clients" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("clients")}><Users size={18} /><span>Clientes</span><span className="nav-count">{clients.length}</span></button>
           {canManageUsers && <button className={currentPage === "users" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("users")}><UserCog size={18} /><span>Equipe e acessos</span><span className="nav-count">{users.length}</span></button>}
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><ArrowDownToLine size={18} /><span>Importações</span><span className="soon">EM BREVE</span></button>
+          {canImportClients && <button className={currentPage === "imports" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("imports")}><ArrowDownToLine size={18} /><span>Importações</span></button>}
           <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><FileText size={18} /><span>Documentos</span></button>
           <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><Activity size={18} /><span>Pendências</span></button>
         </nav>
@@ -307,7 +369,7 @@ export default function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : "Equipe"}</strong></div>
+          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : currentPage === "imports" ? "Importações" : "Equipe"}</strong></div>
           <div className="topbar-actions"><span className="environment-tag"><i /> Ambiente de trabalho</span><button className="icon-button" type="button" title="Ajuda" onClick={() => setSuccess("Consulte a documentação da API em /docs no ambiente local.")}><CircleHelp size={18} /></button><button className="icon-button" type="button" title="Notificações — em breve" disabled><Bell size={18} /></button><div className="topbar-avatar">{initials(me.user.full_name)}</div></div>
         </header>
         <div className="page-content">
@@ -343,7 +405,7 @@ export default function App() {
                 <div className="table-footer"><span>Exibindo <strong>{filteredClients.length}</strong> de <strong>{clients.length}</strong> clientes</span><span>Dados do escritório autenticado</span></div>
               </section>
             </>
-          ) : (
+          ) : currentPage === "users" ? (
             <>
               <div className="page-heading">
                 <div><div className="eyebrow">SEGURANÇA · CONTROLE DE ACESSO</div><h1>Equipe e acessos</h1><p>Gerencie quem pode acessar este escritório e quais atividades cada pessoa pode realizar.</p></div>
@@ -383,6 +445,72 @@ export default function App() {
                 })}</div>}
               </section>
               <p className="permissions-note"><LockKeyhole size={14}/> As permissões são verificadas pela API. Alterar a interface não concede acesso adicional; operações fora do perfil são recusadas pelo servidor.</p>
+            </>
+          ) : (
+            <>
+              <div className="page-heading">
+                <div><div className="eyebrow">IMPORTAÇÃO · BASE DE CLIENTES</div><h1>Importação assistida</h1><p>Valide uma planilha antes de adicionar clientes à base do escritório.</p></div>
+              </div>
+              <section className="content-card import-upload-card">
+                <div className="card-heading">
+                  <div><h2>Enviar planilha</h2><p>Formatos aceitos: CSV ou Excel (.xlsx). Até 5 MiB e 1.000 linhas por arquivo.</p></div>
+                  <div className="team-card-icon"><ArrowDownToLine size={18}/></div>
+                </div>
+                <form className="import-form" onSubmit={handlePreviewImport}>
+                  <label className="import-file-label" htmlFor="client-import-file">
+                    <span className="import-file-icon"><FileText size={24}/></span>
+                    <strong>{importFile ? importFile.name : "Escolha sua planilha"}</strong>
+                    <small>{importFile ? "Arquivo selecionado · clique para trocar" : "Clique para selecionar um arquivo CSV ou XLSX"}</small>
+                    <input
+                      id="client-import-file"
+                      type="file"
+                      accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      onChange={event => { setImportFile(event.target.files?.[0] ?? null); setImportBatch(null); setError(""); setSuccess(""); }}
+                      required
+                    />
+                  </label>
+                  <div className="import-help">
+                    <strong>Colunas reconhecidas</strong>
+                    <p><b>Obrigatória:</b> Razão Social (ou <code>legal_name</code>).</p>
+                    <p><b>Opcionais:</b> Nome Fantasia, CNPJ/CPF, E-mail, Telefone e Status (Ativo/Arquivado). A primeira linha deve conter os títulos das colunas.</p>
+                  </div>
+                  <div className="form-actions">
+                    <span className="form-hint">A prévia não grava nenhum cliente.</span>
+                    <button type="submit" className="button button-primary" disabled={!importFile || importBusy}>
+                      {importBusy ? "Validando arquivo..." : "Validar e visualizar"} {!importBusy && <ArrowDownToLine size={16}/>}
+                    </button>
+                  </div>
+                </form>
+              </section>
+              {importBatch && (
+                <section className="content-card import-preview-card">
+                  <div className="card-heading import-preview-heading">
+                    <div>
+                      <h2>Prévia e validação</h2>
+                      <p>{importBatch.total_rows} linha(s) analisada(s). {importBatch.status === "ready" ? "Nenhuma pendência encontrada." : importBatch.status === "confirmed" ? "Importação concluída." : "Há linhas que precisam de correção."}</p>
+                    </div>
+                    <span className={importBatch.status === "invalid" ? "status-pill status-archived" : "status-pill status-active"}>
+                      <i/>{importBatch.status === "ready" ? "Pronta para confirmar" : importBatch.status === "confirmed" ? "Confirmada" : "Com pendências"}
+                    </span>
+                  </div>
+                  <div className="import-preview-scroll">
+                    <table className="import-preview-table">
+                      <thead><tr><th>Linha</th><th>Razão social</th><th>Nome fantasia</th><th>CNPJ/CPF</th><th>E-mail</th><th>Telefone</th><th>Situação</th><th>Validação</th></tr></thead>
+                      <tbody>{importBatch.rows.map(row => (
+                        <tr key={row.row_number} className={row.errors.length ? "import-row-invalid" : ""}>
+                          <td>{row.row_number}</td><td>{row.legal_name || "—"}</td><td>{row.trade_name || "—"}</td><td>{row.tax_id || "—"}</td><td>{row.email || "—"}</td><td>{row.phone || "—"}</td><td>{row.status === "active" ? "Ativo" : row.status === "archived" ? "Arquivado" : row.status || "—"}</td>
+                          <td>{row.errors.length ? <ul className="import-errors">{row.errors.map((message, index) => <li key={index}>{message}</li>)}</ul> : <span className="import-row-ok"><Check size={14}/> OK</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  <div className="import-confirm-footer">
+                    <p>{importBatch.status === "invalid" ? "Nenhum dado foi gravado. Corrija as linhas sinalizadas no arquivo original e envie novamente." : importBatch.status === "confirmed" ? `${importBatch.imported_count} cliente(s) foram adicionados à base deste escritório.` : "Confira as informações acima. Só depois de confirmar os clientes serão gravados."}</p>
+                    {importBatch.status === "ready" && <button className="button button-primary" onClick={() => void handleConfirmImport()} disabled={confirmImportBusy}>{confirmImportBusy ? "Importando..." : `Confirmar e importar ${importBatch.total_rows} cliente(s)`} {!confirmImportBusy && <Check size={16}/>}</button>}
+                  </div>
+                </section>
+              )}
+              <p className="permissions-note"><LockKeyhole size={14}/> Os dados são validados no servidor e vinculados ao escritório da sessão. Arquivos enviados não são armazenados; fica salva apenas a prévia normalizada até a confirmação.</p>
             </>
           )}
           <footer className="page-footer"><span>© 2026 UnikSistemas</span><span>GESTÃO CONTÁBIL · VERSÃO 0.1.0</span></footer>
