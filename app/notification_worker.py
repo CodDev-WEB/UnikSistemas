@@ -32,6 +32,7 @@ def run_once() -> dict[str, int]:
             "tasks_checked": due["checked"],
             "emails_sent": email_result["sent"],
             "emails_failed": email_result["failed"],
+            "emails_expired": email_result["expired"],
         }
         logger.info("Ciclo de notificações: %s", result)
         return result
