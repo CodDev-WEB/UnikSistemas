@@ -160,3 +160,9 @@ def remove_stored_document(storage_path: str, storage_key: str) -> None:
             _document_path(storage_path, storage_key, area).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def purge_quarantined_document(storage_path: str, storage_key: str) -> None:
+    """Permanently remove a document from quarantine, while preserving its audit metadata."""
+    target = _document_path(storage_path, storage_key, "quarantine")
+    target.unlink(missing_ok=True)
