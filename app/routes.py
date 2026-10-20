@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session, aliased
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import (\n    AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow,\n)
+from app.models import (
+    AuditLog, Client, ClientDocument, ClientImportBatch, ClientTask, DocumentUploadLink, Tenant, User, utcnow,
+)
 from app.schemas import (
     ClientCreate,
     ClientRead,
@@ -25,6 +27,10 @@ from app.schemas import (
     ClientTaskCreate,
     ClientTaskRead,
     ClientTaskUpdate,
+    ClientDocumentRead,
+    ClientDocumentReviewUpdate,
+    DocumentUploadLinkRead,
+    PublicDocumentUploadInfo,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -34,7 +40,11 @@ from app.schemas import (
     UserUpdate,
     UserRead,
 )
-from app.security import create_access_token, get_current_user, hash_password, verify_password\nfrom app.document_storage import (\n    ALLOWED_EXTENSIONS, LINK_LIFETIME_DAYS, MAX_DOCUMENT_BYTES, MAX_UPLOADS_PER_LINK,\n    load_document, remove_stored_document, store_document, validate_uploaded_document,\n)
+from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.document_storage import (
+    ALLOWED_EXTENSIONS, LINK_LIFETIME_DAYS, MAX_DOCUMENT_BYTES, MAX_UPLOADS_PER_LINK,
+    load_document, remove_stored_document, store_document, validate_uploaded_document,
+)
 
 router = APIRouter(prefix="/api/v1")
 
@@ -479,7 +489,8 @@ def download_client_import_csv_template(
     """Download a minimal CSV template for client imports."""
     _require_client_editor(current_user)
     content = (
-        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
+        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r
+"
     )
     return Response(
         content=content.encode("utf-8"),
