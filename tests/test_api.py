@@ -432,3 +432,28 @@ def test_client_import_rejects_unsupported_or_empty_files(client: TestClient):
         files={"file": ("clientes.csv", b"Razao Social;CNPJ\n", "text/csv")},
     )
     assert empty_rows.status_code == 422
+
+
+
+def test_pending_client_import_preview_can_be_discarded(client: TestClient):
+    provision(client, "importacao-descartar", "owner@example.com")
+    token = login(client, "importacao-descartar", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    preview = client.post(
+        "/api/v1/imports/clients/preview",
+        headers=headers,
+        files={
+            "file": (
+                "clientes.csv",
+                b"Razao Social;CNPJ\nEmpresa Pendente;44.444.444/0001-44\n",
+                "text/csv",
+            )
+        },
+    )
+    assert preview.status_code == 201, preview.text
+    batch_id = preview.json()["id"]
+
+    discarded = client.delete(f"/api/v1/imports/clients/{batch_id}", headers=headers)
+    assert discarded.status_code == 204
+    assert client.get(f"/api/v1/imports/clients/{batch_id}", headers=headers).status_code == 404
+    assert client.get("/api/v1/clients", headers=headers).json() == []
