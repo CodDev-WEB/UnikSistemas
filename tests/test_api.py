@@ -970,7 +970,7 @@ def test_antivirus_status_endpoint_is_restricted_and_scoped(client: TestClient):
 
 
 def test_antivirus_health_alerts_once_per_transition_and_notifies_recovery(client: TestClient):
-    from datetime import datetime, timedelta, timezone
+    from datetime import UTC, datetime, timedelta
 
     from sqlalchemy import select
 
@@ -979,7 +979,7 @@ def test_antivirus_health_alerts_once_per_transition_and_notifies_recovery(clien
     from app.models import Notification
 
     provision(client, "antivirus-alerts", "owner@example.com")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     stale_info = ClamAVInfo(
         engine_version="1.5.1",
         database_version="28765",
@@ -1026,7 +1026,7 @@ def test_antivirus_health_alerts_once_per_transition_and_notifies_recovery(clien
 
 
 def test_infected_quarantine_content_is_removed_after_retention_but_metadata_remains(client: TestClient):
-    from datetime import datetime, timedelta, timezone
+    from datetime import UTC, datetime, timedelta
     from pathlib import Path
 
     from sqlalchemy import update
@@ -1058,7 +1058,7 @@ def test_infected_quarantine_content_is_removed_after_retention_but_metadata_rem
     )
     assert scan["infected"] == 1
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with client.app.state.test_sessionmaker() as db:
         document = db.get(ClientDocument, document_id)
         assert document.scan_status == "infected"
