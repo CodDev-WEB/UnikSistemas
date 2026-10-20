@@ -301,12 +301,14 @@ export default function App() {
   const loadClientTasks = useCallback(async (activeToken: string) => {
     setTasksLoading(true);
     try {
-      const [rows, files] = await Promise.all([
+      const [rows, files, notices] = await Promise.all([
         api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken),
         api<ClientDocument[]>("/api/v1/documents?limit=100", {}, activeToken),
+        api<NotificationRecord[]>("/api/v1/notifications?limit=100", {}, activeToken),
       ]);
       setTasks(rows);
       setDocuments(files);
+      setNotifications(notices);
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar as pendências.");
@@ -679,6 +681,24 @@ export default function App() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível verificar os prazos.");
+    } finally {
+      setNotificationActionBusy(null);
+    }
+  }
+
+
+  async function handleRetryFailedEmails() {
+    if (!token || !notificationEmailStatus?.configured) return;
+    setNotificationActionBusy("retry-failed");
+    setError("");
+    try {
+      const result = await api<{ queued: number }>("/api/v1/notifications/retry-failed-emails", {
+        method: "POST",
+      }, token);
+      await loadNotifications(token, true);
+      setSuccess(result.queued ? `${result.queued} e-mail(s) reenfileirado(s).` : "Não há e-mails com falha para reenfileirar.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível reenfileirar e-mails.");
     } finally {
       setNotificationActionBusy(null);
     }
@@ -1095,6 +1115,7 @@ export default function App() {
                   </div>
                   <div className="notification-email-footer">
                     <p>Os lembretes automáticos são gerados pelo worker. Para enviar e-mails, configure SMTP no ambiente e habilite <code>EMAIL_NOTIFICATIONS_ENABLED</code>.</p>
+                    {notificationEmailStatus?.configured && (notificationEmailStatus.failed ?? 0) > 0 && <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleRetryFailedEmails()}><Mail size={15}/>{notificationActionBusy === "retry-failed" ? "Reenfileirando..." : `Reenfileirar ${notificationEmailStatus.failed} falha(s)`}</button>}
                     <button className="button button-secondary" disabled={notificationActionBusy !== null} onClick={() => void handleProcessDueReminders()}><CalendarDays size={15}/>{notificationActionBusy === "due-reminders" ? "Verificando..." : "Verificar prazos agora"}</button>
                   </div>
                   {!notificationEmailStatus?.configured && <p className="permissions-note"><LockKeyhole size={14}/> O sistema mantém os avisos na caixa interna e não envia e-mails enquanto SMTP estiver desativado.</p>}
