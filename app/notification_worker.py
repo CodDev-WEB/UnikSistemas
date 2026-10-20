@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.config import get_settings
 from app.db import SessionLocal
 from app.notifications import enqueue_due_reminders, process_email_queue
-from app.models import utcnow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("unik.notification_worker")
