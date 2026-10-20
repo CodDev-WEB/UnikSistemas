@@ -495,7 +495,7 @@ def test_client_import_templates_require_auth_and_have_expected_headers(client: 
     sheet = workbook["Clientes"]
     assert [cell.value for cell in sheet[1]] == csv_headers
     assert sheet["C2"].number_format == "@"
-    assert "Razão Social" in str(workbook["Instruções"]["A2"].value)
+    assert "preencha" in str(workbook["Instruções"]["A2"].value).lower()
     workbook.close()
 
 
