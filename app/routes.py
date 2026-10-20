@@ -1494,7 +1494,7 @@ def process_due_reminders_now(
         today = datetime.now(ZoneInfo(settings.notification_timezone)).date()
     except ZoneInfoNotFoundError:
         raise HTTPException(status_code=500, detail="Fuso horário de notificações inválido.") from None
-    result = enqueue_due_reminders(db, today, days_ahead=1)
+    result = enqueue_due_reminders(db, today, days_ahead=1, tenant_id=current_user.tenant_id)
     db.commit()
     counts = notification_queue_counts(db, current_user.tenant_id)
     return {
