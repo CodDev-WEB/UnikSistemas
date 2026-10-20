@@ -422,6 +422,12 @@ export default function App() {
     }
   }, [token, me, currentPage, loadClientTasks]);
 
+  useEffect(() => {
+    if (token && me && currentPage === "notifications") {
+      void loadNotifications(token, ["owner", "admin"].includes(me.user.role));
+    }
+  }, [token, me, currentPage, loadNotifications]);
+
   const filteredTasks = useMemo(() => {
     const query = taskSearch.trim().toLocaleLowerCase("pt-BR");
     return tasks.filter(task => {
