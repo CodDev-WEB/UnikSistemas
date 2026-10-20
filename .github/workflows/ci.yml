@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Nginx rate-limit and reverse-proxy configuration
         run: |
-          docker run --rm \
+          docker run --rm --add-host=api:127.0.0.1 \
             -v "$PWD/frontend:/fixture:ro" \
             nginx:1.27-alpine sh -c '
               mkdir -p /etc/nginx/snippets &&
