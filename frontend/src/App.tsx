@@ -66,7 +66,8 @@ const taskKindLabels: Record<ClientTask["kind"], string> = {
 const taskPriorityLabels: Record<ClientTask["priority"], string> = {
   low: "Baixa", normal: "Normal", high: "Alta",
 };
-type TokenResponse = { access_token: string; token_type: string; expires_in: number };\n
+type TokenResponse = { access_token: string; token_type: string; expires_in: number };
+
 type NotificationEventType = "document_received" | "task_assigned" | "task_due";
 type NotificationEmailStatus = {
   enabled: boolean; configured: boolean; pending: number; failed: number; note: string;
@@ -243,7 +244,11 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks" | "notifications">("dashboard");
-  const [tasks, setTasks] = useState<ClientTask[]>([]);\n  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);\n  const [notificationEmailStatus, setNotificationEmailStatus] = useState<NotificationEmailStatus | null>(null);\n  const [notificationsLoading, setNotificationsLoading] = useState(false);\n  const [notificationActionBusy, setNotificationActionBusy] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [notificationEmailStatus, setNotificationEmailStatus] = useState<NotificationEmailStatus | null>(null);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationActionBusy, setNotificationActionBusy] = useState<string | null>(null);
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [taskUploadLinks, setTaskUploadLinks] = useState<Record<string, ActiveUploadLink>>({});
   const [taskLinkBusy, setTaskLinkBusy] = useState<string | null>(null);
@@ -340,6 +345,7 @@ export default function App() {
       setMe(profile);
       setClients(list);
       setUsers(staff);
+      await loadNotifications(activeToken, ["owner", "admin"].includes(profile.user.role));
       setError("");
     } catch (err) {
       sessionStorage.removeItem("unik_access_token");
@@ -351,6 +357,8 @@ export default function App() {
       setImportBatch(null);
       setImportHistory([]);
       setTasks([]);
+      setNotifications([]);
+      setNotificationEmailStatus(null);
       setDocuments([]);
       setTaskUploadLinks({});
       setShowTaskForm(false);
@@ -365,7 +373,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadNotifications]);
 
   useEffect(() => {
     if (publicUploadToken) {
@@ -383,6 +391,8 @@ export default function App() {
       setImportBatch(null);
       setImportHistory([]);
       setTasks([]);
+      setNotifications([]);
+      setNotificationEmailStatus(null);
       setShowTaskForm(false);
       setTaskForm({
     client_id: "", title: "", description: "", kind: "document",
@@ -864,6 +874,8 @@ export default function App() {
     setImportBatch(null);
     setImportHistory([]);
     setTasks([]);
+    setNotifications([]);
+    setNotificationEmailStatus(null);
     setShowTaskForm(false);
     setTaskForm({
     client_id: "", title: "", description: "", kind: "document",
@@ -964,7 +976,8 @@ export default function App() {
           <button className={currentPage === "clients" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("clients")}><Users size={18} /><span>Clientes</span><span className="nav-count">{clients.length}</span></button>
           {canManageUsers && <button className={currentPage === "users" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("users")}><UserCog size={18} /><span>Equipe e acessos</span><span className="nav-count">{users.length}</span></button>}
           {canImportClients && <button className={currentPage === "imports" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("imports")}><ArrowDownToLine size={18} /><span>Importações</span></button>}
-          <button className={currentPage === "tasks" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("tasks")}><ClipboardList size={18}/><span>Pendências e documentos</span><span className="nav-count">{tasks.filter(task => ["open", "received"].includes(task.status)).length}</span></button>\n          <button className={currentPage === "notifications" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("notifications")}><Bell size={18}/><span>Notificações</span>{notifications.filter(item => !item.is_read).length > 0 && <span className="nav-count">{Math.min(notifications.filter(item => !item.is_read).length, 99)}</span>}</button>
+          <button className={currentPage === "tasks" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("tasks")}><ClipboardList size={18}/><span>Pendências e documentos</span><span className="nav-count">{tasks.filter(task => ["open", "received"].includes(task.status)).length}</span></button>
+          <button className={currentPage === "notifications" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("notifications")}><Bell size={18}/><span>Notificações</span>{notifications.filter(item => !item.is_read).length > 0 && <span className="nav-count">{Math.min(notifications.filter(item => !item.is_read).length, 99)}</span>}</button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note"><div className="note-icon"><ShieldCheck size={16} /></div><div><strong>Seu espaço, seus dados</strong><p>O acesso é restrito ao escritório autenticado.</p></div></div>
