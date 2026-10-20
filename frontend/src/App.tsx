@@ -89,6 +89,9 @@ export default function App() {
       setMe(null);
       setClients([]);
       setUsers([]);
+      setImportFile(null);
+      setImportBatch(null);
+      setCurrentPage("dashboard");
       setError(err instanceof Error ? err.message : "Sua sessão não está disponível.");
     } finally {
       setLoading(false);
@@ -103,6 +106,9 @@ export default function App() {
       setMe(null);
       setClients([]);
       setUsers([]);
+      setImportFile(null);
+      setImportBatch(null);
+      setCurrentPage("dashboard");
     }
   }, [token, loadWorkspace]);
 
@@ -263,6 +269,8 @@ export default function App() {
     setMe(null);
     setClients([]);
     setUsers([]);
+    setImportFile(null);
+    setImportBatch(null);
     setError("");
     setSuccess("");
     setCurrentPage("dashboard");
