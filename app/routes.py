@@ -441,6 +441,32 @@ def read_client_import_preview(
     return _serialize_import_batch(batch)
 
 
+@router.delete(
+    "/imports/clients/{batch_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Imports"],
+)
+def discard_client_import(
+    batch_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Delete a pending import preview without touching client records."""
+    _require_client_editor(current_user)
+    batch = db.scalar(
+        select(ClientImportBatch).where(
+            ClientImportBatch.id == batch_id,
+            ClientImportBatch.tenant_id == current_user.tenant_id,
+        )
+    )
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Importação não encontrada.")
+    if batch.status == "confirmed":
+        raise HTTPException(status_code=409, detail="A importação confirmada não pode ser descartada.")
+    db.delete(batch)
+    db.commit()
+
+
 @router.post(
     "/imports/clients/{batch_id}/confirm",
     response_model=ClientImportBatchRead,
