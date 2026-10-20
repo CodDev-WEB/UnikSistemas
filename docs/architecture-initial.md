@@ -20,6 +20,8 @@
 7. Caixa de notificações por usuário para documentos recebidos, novas atribuições e lembretes de prazo.
 8. Fila de e-mail SMTP opcional, desabilitada por padrão, com estado de entrega e reenvio manual de falhas.
 9. Auditoria de operações relevantes e pipeline automatizado de testes.
+10. Monitoramento do ClamAV, alertas internos por mudança de estado e retenção configurável de payloads infectados.
+11. Scripts de backup e restauração do PostgreSQL e do volume de documentos, com checksums, proteção contra extração de caminhos inseguros e confirmação explícita para restaurações destrutivas.
 
 ## Principais fluxos de segurança
 
@@ -37,7 +39,7 @@
 - O MVP não é um sistema contábil/fiscal completo: não transmite declarações, calcula tributos nem integra serviços fiscais oficiais.
 - ClamAV e a quarentena reduzem o risco de liberar arquivos maliciosos, mas não são garantia absoluta: assinaturas podem não detectar ameaças novas. A política padrão remove o conteúdo infectado após 30 dias, preservando metadados e auditoria; retenção e limpeza devem ser monitoradas.
 - O rate limiting existe no Nginx, mas depende de o proxy externo sobrescrever `X-Real-IP` com o endereço real do cliente; sem essa configuração, muitos usuários podem compartilhar um bucket.
-- A proteção de segredos e banco em produção exige secret manager, política de rotação e backups com restauração testada.
+- A proteção de segredos e banco em produção exige secret manager, política de rotação e ensaios de restauração. Os scripts de backup foram preparados, mas a recuperação ponta a ponta precisa ser comprovada em homologação.
 - O estado do ClamAV e alertas de scanner indisponível/assinaturas antigas são expostos a responsáveis e administradores; alertas internos não substituem monitoramento externo do host.
 - O deploy precisa de TLS/HTTPS, HSTS na borda, monitoramento externo, backup/restauração e estratégia de retenção de documentos.
 - A autenticação ainda usa token no `sessionStorage`; revisar sessão, proteção contra XSS, recuperação de senha e MFA antes de uso externo.
@@ -47,4 +49,4 @@
 
 ## Próxima etapa recomendada
 
-Antes de módulos fiscais, concluir uma etapa de prontidão operacional: validar alertas com o scanner realmente indisponível e com assinaturas antigas, confirmar permissões e retenção do volume de uploads, testar transporte SMTP em homologação, estabelecer política para fila acumulada, revisar o isolamento multi-tenant e validar backup/restauração em staging. Também deve ser validada a configuração do proxy de borda para IP real, TLS/HSTS e observabilidade. Só depois preparar deployment HTTPS com segredos protegidos e aprovação humana.
+Antes de módulos fiscais, executar e registrar a validação de prontidão em homologação: ensaiar restauração completa a partir de backup, simular ClamAV indisponível e assinaturas antigas, testar SMTP real com destinatário autorizado, rever a fila acumulada, repetir testes de isolamento multi-tenant e validar o proxy de borda para IP real, TLS/HSTS e monitoramento externo. Os scripts de backup/restauração estão disponíveis em `docs/backup-restore.md`, mas ainda não substituem um ensaio bem-sucedido. Só depois preparar deployment HTTPS com segredos protegidos e aprovação humana.

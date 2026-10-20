@@ -37,9 +37,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Lint
-        run: ruff check app tests
+        run: ruff check app tests scripts
       - name: Run tests
         run: pytest -q
+      - name: Validate operational shell scripts
+        run: bash -n scripts/backup.sh scripts/restore.sh
       - name: Verify database migrations
         run: alembic upgrade head
 

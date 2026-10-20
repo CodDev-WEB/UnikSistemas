@@ -22,7 +22,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
 
-Consulte a [arquitetura inicial](docs/architecture-initial.md) e o [briefing do sistema contábil](docs/briefing-sistema-contabil.md).
+Consulte a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md) e o [procedimento de backup e restauração](docs/backup-restore.md).
 
 ## Requisitos
 
@@ -47,6 +47,10 @@ Verificações de saúde:
 - <http://127.0.0.1:3000/health>
 
 As portas estão vinculadas ao loopback por padrão e não expostas diretamente para a rede local.
+
+## Backup e restauração
+
+Os scripts `bash scripts/backup.sh` e `bash scripts/restore.sh CAMINHO_DO_BACKUP` geram e restauram em conjunto o dump PostgreSQL e o volume de documentos. O backup valida os arquivos e cria checksums; a restauração exige confirmação explícita e mantém a API/workers parados se houver erro. **Teste a restauração em homologação isolada antes de qualquer uso com dados reais.** O procedimento completo, os arquivos incluídos e a lista de validação estão em [Backup e restauração](docs/backup-restore.md).
 
 ## Provisionar o primeiro escritório
 
@@ -90,9 +94,9 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 
 - E-mails automáticos enviados aos clientes, convites por e-mail, recuperação de senha e MFA.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
-- Observabilidade avançada, alertas operacionais e procedimento validado de backup/restauração.
+- Observabilidade externa e restauração de backup validada em homologação.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
-- Política de retenção e limpeza operacional de arquivos infectados em quarentena; revisão do scanner e plano de resposta a incidentes.
+- Revisão contínua do scanner e plano de resposta a incidentes.
 
 O recebimento de arquivos usa ClamAV em serviço isolado, com base de assinaturas persistida. A primeira inicialização pode levar vários minutos enquanto as assinaturas são baixadas e carregadas. Reserve cerca de 4 GiB de memória para o contêiner ClamAV. O worker consulta `VERSION` a cada ciclo e só processa a fila quando o scanner responde e a base de assinaturas tem até `ANTIVIRUS_SIGNATURE_MAX_AGE_HOURS` horas (padrão: 72). Se o scanner estiver indisponível ou as assinaturas estiverem antigas, a análise é pausada e responsáveis/administradores recebem alerta interno. Na página **Notificações**, responsáveis e administradores veem o estado do scanner, a idade das assinaturas e as contagens da própria organização. Os novos envios ficam em `quarantine/` e só são movidos para `clean/` após resultado limpo. Conteúdos infectados são removidos após `ANTIVIRUS_INFECTED_RETENTION_DAYS` dias (padrão: 30), mantendo metadados e o registro de auditoria. Falhas de limpeza são tentadas novamente em ciclos posteriores. Para acompanhar a análise, use `docker compose logs -f document-scan-worker clamav`.
 
