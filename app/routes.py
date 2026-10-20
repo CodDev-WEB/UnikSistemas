@@ -2,7 +2,7 @@ import hashlib
 import secrets
 from datetime import timedelta
 from io import BytesIO
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
