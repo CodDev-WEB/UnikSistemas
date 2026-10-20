@@ -40,12 +40,13 @@ def validated_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
             or path.parts[0] != "uploads"
         ):
             raise ValueError(f"Caminho inseguro no arquivo: {name!r}")
-        if name in seen:
+        normalized_name = path.as_posix()
+        if normalized_name in seen:
             raise ValueError(f"Entrada duplicada no arquivo: {name!r}")
-        seen.add(name)
+        seen.add(normalized_name)
         if not (member.isdir() or member.isfile()):
             raise ValueError(f"Tipo de entrada não permitido no arquivo: {name!r}")
-        if name == "uploads":
+        if normalized_name == "uploads":
             if not member.isdir():
                 raise ValueError("A raiz do volume no arquivo deve ser um diretório.")
             has_root = True
