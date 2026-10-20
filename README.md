@@ -87,7 +87,7 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 ## Funcionalidades ainda não implementadas
 
 - Convites por e-mail, recuperação de senha e MFA.
-- Anexos de documentos, notificações e rotinas contábeis automatizadas.
+- Notificações automáticas ao cliente e rotinas contábeis automatizadas.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
@@ -112,7 +112,7 @@ Situações disponíveis: **Pendente**, **Recebido**, **Concluído** e **Cancela
 
 Endpoints: `GET /api/v1/tasks?limit=100` com filtros opcionais `status` e `client_id`; `POST /api/v1/tasks` para criar e `PATCH /api/v1/tasks/{task_id}` para atualizar. O perfil Consulta pode visualizar, mas não criar nem atualizar. Todos os acessos são limitados ao escritório do token; cliente e responsável atribuídos são validados no servidor.
 
-Este módulo é um controle operacional manual. Não anexa arquivos físicos, envia mensagens ao cliente, transmite declarações, calcula tributos nem executa prazos fiscais automaticamente.
+Este módulo é um controle operacional manual. Pendências do tipo Documento podem gerar um link temporário de envio: o link expira em 7 dias, admite até 5 arquivos e pode ser revogado pela equipe; a emissão de um novo link invalida o anterior. O portal aceita PDF, PNG, JPG, CSV, XLSX e DOCX, com limite de 10 MiB por arquivo e verificação básica do formato. A equipe autenticada pode baixar os anexos e registrar conferência ou pedido de correção; downloads, recebimentos e revisões geram auditoria. O recebimento não envia e-mails nem transmite declarações, calcula tributos ou executa prazos fiscais automaticamente.\n\nO armazenamento padrão usa volume persistente Docker (`document_uploads`) no caminho configurado por `DOCUMENT_STORAGE_PATH`. Antes de produção, configure HTTPS, limites de taxa, antivírus/inspeção de arquivos, política de retenção e backup testado. Não compartilhe links de envio em canais públicos; quem possui o link pode enviar arquivos para a pendência correspondente.
 
 ## Perfis de acesso
 
