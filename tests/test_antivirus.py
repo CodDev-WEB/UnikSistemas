@@ -1,5 +1,5 @@
 import struct
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -74,7 +74,7 @@ def test_clamd_version_parser_extracts_signature_database_build_date():
 
     assert info.engine_version == "1.5.1"
     assert info.database_version == "28765"
-    assert info.database_date == datetime(2026, 10, 20, 10, 30, tzinfo=timezone.utc)
+    assert info.database_date == datetime(2026, 10, 20, 10, 30, tzinfo=UTC)
 
 
 def test_clamd_version_parser_rejects_unverifiable_signature_date():
@@ -83,7 +83,7 @@ def test_clamd_version_parser_rejects_unverifiable_signature_date():
 
 
 def test_signature_freshness_is_strict_and_marks_old_or_future_dates_stale():
-    now = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 20, 12, tzinfo=UTC)
 
     assert antivirus.signature_status(now - timedelta(hours=12), now, 72) == ("healthy", None)
     stale_status, message = antivirus.signature_status(now - timedelta(hours=73), now, 72)
