@@ -49,6 +49,7 @@ def queue_notification(
         is_read=False,
         email_status="pending",
         email_attempts=0,
+        email_queued_at=utcnow(),
     )
     db.add(notification)
     return notification
@@ -104,16 +105,45 @@ def _send_email(notification: Notification, recipient: User, settings: Settings)
         smtp.send_message(message)
 
 
-def process_email_queue(db: Session, settings: Settings, limit: int = 50) -> dict[str, int]:
-    """Send a bounded batch of queued messages; failures require explicit retry."""
+def process_email_queue(
+    db: Session,
+    settings: Settings,
+    limit: int = 50,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Send only fresh messages; old backlog is expired and requires explicit operator retry."""
     if not notification_email_is_ready(settings):
-        return {"sent": 0, "failed": 0, "skipped": 0}
+        return {"sent": 0, "failed": 0, "skipped": 0, "expired": 0}
+
+    current_time = now or utcnow()
+    cutoff = current_time - timedelta(hours=settings.email_queue_max_age_hours)
+    batch_limit = max(1, min(limit, 200))
+
+    # A notification created while SMTP was disabled must not be sent weeks later merely
+    # because SMTP is switched on. Mark stale records for explicit admin approval first.
+    expired_items = db.scalars(
+        select(Notification)
+        .where(
+            Notification.email_status == "pending",
+            Notification.email_queued_at < cutoff,
+        )
+        .order_by(Notification.email_queued_at.asc(), Notification.id.asc())
+        .limit(batch_limit)
+    ).all()
+    for item in expired_items:
+        item.email_status = "failed"
+        item.email_last_error = "fila_expirada_requer_reenvio_manual"
+    if expired_items:
+        db.commit()
 
     notifications = db.scalars(
         select(Notification)
-        .where(Notification.email_status == "pending")
-        .order_by(Notification.created_at.asc(), Notification.id.asc())
-        .limit(max(1, min(limit, 200)))
+        .where(
+            Notification.email_status == "pending",
+            Notification.email_queued_at >= cutoff,
+        )
+        .order_by(Notification.email_queued_at.asc(), Notification.id.asc())
+        .limit(batch_limit)
     ).all()
 
     sent = 0
@@ -150,7 +180,7 @@ def process_email_queue(db: Session, settings: Settings, limit: int = 50) -> dic
         except Exception:
             db.rollback()
             raise
-    return {"sent": sent, "failed": failed, "skipped": skipped}
+    return {"sent": sent, "failed": failed, "skipped": skipped, "expired": len(expired_items)}
 
 
 def enqueue_due_reminders(
@@ -229,4 +259,11 @@ def notification_queue_counts(db: Session, tenant_id: str) -> dict[str, int]:
             Notification.email_status == "failed",
         )
     ) or 0
-    return {"pending": int(pending), "failed": int(failed)}
+    expired = db.scalar(
+        select(func.count(Notification.id)).where(
+            Notification.tenant_id == tenant_id,
+            Notification.email_status == "failed",
+            Notification.email_last_error == "fila_expirada_requer_reenvio_manual",
+        )
+    ) or 0
+    return {"pending": int(pending), "failed": int(failed), "expired": int(expired)}
