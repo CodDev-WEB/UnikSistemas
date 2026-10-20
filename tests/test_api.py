@@ -1220,7 +1220,7 @@ def test_notifications_are_private_to_user_and_tenant(client: TestClient):
 
 
 def test_old_email_backlog_expires_until_admin_explicitly_requeues(client: TestClient, monkeypatch):
-    from datetime import timedelta
+    from datetime import UTC, timedelta
 
     from sqlalchemy import select
 
@@ -1290,7 +1290,10 @@ def test_old_email_backlog_expires_until_admin_explicitly_requeues(client: TestC
         assert notice is not None
         assert notice.email_status == "pending"
         assert notice.email_last_error is None
-        assert notice.email_queued_at >= now - timedelta(minutes=1)
+        queued_at = notice.email_queued_at
+        if queued_at.tzinfo is None:
+            queued_at = queued_at.replace(tzinfo=UTC)
+        assert queued_at >= now - timedelta(minutes=1)
         audits = db.scalars(
             select(AuditLog).where(
                 AuditLog.action == "notification.email_retry_requested",
