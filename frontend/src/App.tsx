@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity, ArrowDownToLine, ArrowRight, Bell, Building2, Check, ChevronDown,
   CircleHelp, Clock3, Download, FileSpreadsheet, FileText, LayoutDashboard, LockKeyhole, LogOut, Plus,
-  RefreshCw, Search, Settings2, ShieldCheck, Users, UserPlus, UserCog, X,
+  RefreshCw, Search, Settings2, ShieldCheck, Users, UserPlus, UserCog, ClipboardList, CalendarDays, X,
 } from "lucide-react";
 
 type Tenant = { id: string; name: string; slug: string; status: string };
@@ -44,6 +44,28 @@ function importStatusClass(status: ImportStatus) {
   if (status === "ready") return "status-pending";
   return "status-archived";
 }
+type ClientTask = {
+  id: string; client_id: string; client_name: string; title: string; description: string | null;
+  kind: "document" | "follow_up" | "routine"; priority: "low" | "normal" | "high";
+  status: "open" | "received" | "completed" | "cancelled"; due_date: string | null;
+  assigned_to_user_id: string | null; assigned_to_name: string | null;
+  created_by_user_id: string | null; created_by_name: string | null;
+  completed_at: string | null; created_at: string | null; updated_at: string | null;
+};
+type TaskStatus = ClientTask["status"];
+type TaskForm = {
+  client_id: string; title: string; description: string; kind: ClientTask["kind"];
+  priority: ClientTask["priority"]; due_date: string; assigned_to_user_id: string;
+};
+const taskStatusLabels: Record<TaskStatus, string> = {
+  open: "Pendente", received: "Recebido", completed: "Concluído", cancelled: "Cancelado",
+};
+const taskKindLabels: Record<ClientTask["kind"], string> = {
+  document: "Documento", follow_up: "Acompanhamento", routine: "Rotina interna",
+};
+const taskPriorityLabels: Record<ClientTask["priority"], string> = {
+  low: "Baixa", normal: "Normal", high: "Alta",
+};
 type TokenResponse = { access_token: string; token_type: string; expires_in: number };
 
 async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -82,7 +104,18 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports">("dashboard");
+  const [currentPage, setCurrentPage] = useState<"dashboard" | "clients" | "users" | "imports" | "tasks">("dashboard");
+  const [tasks, setTasks] = useState<ClientTask[]>([]);
+  const [taskFilter, setTaskFilter] = useState<"all" | TaskStatus>("open");
+  const [taskClientFilter, setTaskClientFilter] = useState("all");
+  const [taskSearch, setTaskSearch] = useState("");
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [taskBusy, setTaskBusy] = useState(false);
+  const [taskForm, setTaskForm] = useState<TaskForm>({
+    client_id: "", title: "", description: "", kind: "document",
+    priority: "normal", due_date: "", assigned_to_user_id: "",
+  });
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importBatch, setImportBatch] = useState<ImportBatch | null>(null);
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>([]);
@@ -115,6 +148,19 @@ export default function App() {
     }
   }, []);
 
+  const loadClientTasks = useCallback(async (activeToken: string) => {
+    setTasksLoading(true);
+    try {
+      const rows = await api<ClientTask[]>("/api/v1/tasks?limit=100", {}, activeToken);
+      setTasks(rows);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível carregar as pendências.");
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
   const loadWorkspace = useCallback(async (activeToken: string) => {
     setLoading(true);
     try {
@@ -136,6 +182,7 @@ export default function App() {
       setImportFile(null);
       setImportBatch(null);
       setImportHistory([]);
+      setTasks([]);
       setCurrentPage("dashboard");
       setError(err instanceof Error ? err.message : "Sua sessão não está disponível.");
     } finally {
@@ -154,6 +201,7 @@ export default function App() {
       setImportFile(null);
       setImportBatch(null);
       setImportHistory([]);
+      setTasks([]);
       setCurrentPage("dashboard");
     }
   }, [token, loadWorkspace]);
@@ -163,6 +211,23 @@ export default function App() {
       void loadImportHistory(token);
     }
   }, [token, me, currentPage, loadImportHistory]);
+
+  useEffect(() => {
+    if (token && me && currentPage === "tasks") {
+      void loadClientTasks(token);
+    }
+  }, [token, me, currentPage, loadClientTasks]);
+
+  const filteredTasks = useMemo(() => {
+    const query = taskSearch.trim().toLocaleLowerCase("pt-BR");
+    return tasks.filter(task => {
+      const matchesStatus = taskFilter === "all" || task.status === taskFilter;
+      const matchesClient = taskClientFilter === "all" || task.client_id === taskClientFilter;
+      const haystack = [task.title, task.description ?? "", task.client_name, task.assigned_to_name ?? ""]
+        .join(" ").toLocaleLowerCase("pt-BR");
+      return matchesStatus && matchesClient && (!query || haystack.includes(query));
+    });
+  }, [tasks, taskFilter, taskClientFilter, taskSearch]);
 
   const filteredClients = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("pt-BR");
@@ -224,6 +289,58 @@ export default function App() {
   }
 
 
+
+  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !taskForm.client_id) return;
+    setTaskBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const created = await api<ClientTask>("/api/v1/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          client_id: taskForm.client_id,
+          title: taskForm.title.trim(),
+          description: taskForm.description.trim() || null,
+          kind: taskForm.kind,
+          priority: taskForm.priority,
+          due_date: taskForm.due_date || null,
+          assigned_to_user_id: taskForm.assigned_to_user_id || null,
+        }),
+      }, token);
+      setTasks(previous => [created, ...previous]);
+      setTaskForm({
+        client_id: "", title: "", description: "", kind: "document",
+        priority: "normal", due_date: "", assigned_to_user_id: "",
+      });
+      setShowTaskForm(false);
+      setSuccess("Pendência registrada para o cliente.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível criar a pendência.");
+    } finally {
+      setTaskBusy(false);
+    }
+  }
+
+  async function handleUpdateTask(taskId: string, patch: { status?: TaskStatus; due_date?: string | null; assigned_to_user_id?: string | null }) {
+    if (!token) return;
+    setTaskBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const updated = await api<ClientTask>(`/api/v1/tasks/${taskId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }, token);
+      setTasks(previous => previous.map(task => task.id === updated.id ? updated : task));
+      setSuccess(`Pendência atualizada: ${taskStatusLabels[updated.status]}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar a pendência.");
+    } finally {
+      setTaskBusy(false);
+    }
+  }
 
   async function handleDownloadTemplate(format: "csv" | "xlsx") {
     if (!token) return;
@@ -396,6 +513,7 @@ export default function App() {
     setImportFile(null);
     setImportBatch(null);
     setImportHistory([]);
+    setTasks([]);
     setError("");
     setSuccess("");
     setCurrentPage("dashboard");
@@ -487,8 +605,7 @@ export default function App() {
           <button className={currentPage === "clients" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("clients")}><Users size={18} /><span>Clientes</span><span className="nav-count">{clients.length}</span></button>
           {canManageUsers && <button className={currentPage === "users" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("users")}><UserCog size={18} /><span>Equipe e acessos</span><span className="nav-count">{users.length}</span></button>}
           {canImportClients && <button className={currentPage === "imports" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("imports")}><ArrowDownToLine size={18} /><span>Importações</span></button>}
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><FileText size={18} /><span>Documentos</span></button>
-          <button className="nav-item nav-disabled" type="button" title="Módulo planejado" disabled><Activity size={18} /><span>Pendências</span></button>
+          <button className={currentPage === "tasks" ? "nav-item selected" : "nav-item"} onClick={() => setCurrentPage("tasks")}><ClipboardList size={18}/><span>Pendências e documentos</span><span className="nav-count">{tasks.filter(task => ["open", "received"].includes(task.status)).length}</span></button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="sidebar-note"><div className="note-icon"><ShieldCheck size={16} /></div><div><strong>Seu espaço, seus dados</strong><p>O acesso é restrito ao escritório autenticado.</p></div></div>
@@ -502,7 +619,7 @@ export default function App() {
 
       <main className="main-area">
         <header className="topbar">
-          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : currentPage === "imports" ? "Importações" : "Equipe"}</strong></div>
+          <div className="breadcrumb"><span>UnikSistemas</span><span className="crumb-divider">/</span><strong>{currentPage === "dashboard" ? "Visão geral" : currentPage === "clients" ? "Clientes" : currentPage === "imports" ? "Importações" : currentPage === "tasks" ? "Pendências e documentos" : "Equipe"}</strong></div>
           <div className="topbar-actions"><span className="environment-tag"><i /> Ambiente de trabalho</span><button className="icon-button" type="button" title="Ajuda" onClick={() => setSuccess("Consulte a documentação da API em /docs no ambiente local.")}><CircleHelp size={18} /></button><button className="icon-button" type="button" title="Notificações — em breve" disabled><Bell size={18} /></button><div className="topbar-avatar">{initials(me.user.full_name)}</div></div>
         </header>
         <div className="page-content">
@@ -578,6 +695,65 @@ export default function App() {
                 })}</div>}
               </section>
               <p className="permissions-note"><LockKeyhole size={14}/> As permissões são verificadas pela API. Alterar a interface não concede acesso adicional; operações fora do perfil são recusadas pelo servidor.</p>
+            </>
+          ) : currentPage === "tasks" ? (
+            <>
+              <div className="page-heading task-page-heading">
+                <div><div className="eyebrow">ROTINA DO ESCRITÓRIO · ACOMPANHAMENTO</div><h1>Pendências e documentos</h1><p>Controle solicitações, prazos e responsáveis por cliente, sem perder o histórico do trabalho.</p></div>
+                {["owner", "admin", "accountant", "assistant"].includes(me.user.role) && <button className="button button-primary" onClick={() => setShowTaskForm(value => !value)}><Plus size={16}/>{showTaskForm ? "Fechar formulário" : "Nova pendência"}</button>}
+              </div>
+              {showTaskForm && <section className="content-card create-card task-create-card">
+                <div className="card-heading"><div><h2>Registrar pendência</h2><p>Selecione o cliente, descreva o que precisa ser recebido ou acompanhado e defina o prazo.</p></div><div className="team-card-icon"><ClipboardList size={18}/></div></div>
+                {clients.filter(client => client.status === "active").length === 0 ? <div className="empty-state"><p>Cadastre um cliente ativo antes de registrar uma pendência.</p><button className="button button-secondary" onClick={() => setCurrentPage("clients")}>Abrir clientes</button></div> : <form className="client-form task-form" onSubmit={handleCreateTask}>
+                  <div className="field field-wide"><label htmlFor="task-client">Cliente *</label><select id="task-client" value={taskForm.client_id} onChange={event => setTaskForm({...taskForm, client_id:event.target.value})} required><option value="">Selecione um cliente</option>{clients.filter(client => client.status === "active").map(client => <option key={client.id} value={client.id}>{client.trade_name || client.legal_name}</option>)}</select></div>
+                  <div className="field field-wide"><label htmlFor="task-title">Pendência / documento solicitado *</label><input id="task-title" value={taskForm.title} onChange={event => setTaskForm({...taskForm, title:event.target.value})} required minLength={2} maxLength={200} placeholder="Ex.: Extratos bancários de setembro"/></div>
+                  <div className="field field-wide"><label htmlFor="task-description">Descrição / orientação</label><textarea id="task-description" value={taskForm.description} onChange={event => setTaskForm({...taskForm, description:event.target.value})} maxLength={2000} rows={3} placeholder="Detalhes úteis para quem vai atender a solicitação"/></div>
+                  <div className="field"><label htmlFor="task-kind">Tipo *</label><select id="task-kind" value={taskForm.kind} onChange={event => setTaskForm({...taskForm,kind:event.target.value as ClientTask["kind"]})}><option value="document">Documento solicitado</option><option value="follow_up">Acompanhamento do cliente</option><option value="routine">Rotina interna</option></select></div>
+                  <div className="field"><label htmlFor="task-priority">Prioridade *</label><select id="task-priority" value={taskForm.priority} onChange={event => setTaskForm({...taskForm,priority:event.target.value as ClientTask["priority"]})}><option value="low">Baixa</option><option value="normal">Normal</option><option value="high">Alta</option></select></div>
+                  <div className="field"><label htmlFor="task-due-date">Prazo</label><input id="task-due-date" type="date" value={taskForm.due_date} onChange={event => setTaskForm({...taskForm,due_date:event.target.value})}/></div>
+                  <div className="field"><label htmlFor="task-assignee">Responsável interno</label><select id="task-assignee" value={taskForm.assigned_to_user_id} onChange={event => setTaskForm({...taskForm,assigned_to_user_id:event.target.value})}><option value="">Atribuir a mim ({me.user.full_name})</option>{users.filter(user => user.is_active).map(user => <option key={user.id} value={user.id}>{user.full_name} · {user.email}</option>)}</select></div>
+                  <div className="form-actions"><span className="form-hint">Nenhum e-mail ou obrigação fiscal será enviado automaticamente.</span><button type="button" className="button button-secondary" onClick={() => setShowTaskForm(false)}>Cancelar</button><button type="submit" className="button button-primary" disabled={taskBusy}>{taskBusy ? "Salvando..." : "Registrar pendência"} {!taskBusy && <Check size={16}/>}</button></div>
+                </form>}
+              </section>}
+              <section className="metric-grid task-metric-grid">
+                <div className="metric-card"><div className="metric-top"><span>Pendentes</span><div className="metric-icon icon-amber"><Clock3 size={18}/></div></div><div className="metric-value">{tasks.filter(task => task.status === "open").length.toString().padStart(2, "0")}</div><div className="metric-foot"><span className="metric-neutral">Aguardando ação</span><span className="metric-foot-label">ABERTAS</span></div></div>
+                <div className="metric-card"><div className="metric-top"><span>Documentos recebidos</span><div className="metric-icon icon-indigo"><FileText size={18}/></div></div><div className="metric-value">{tasks.filter(task => task.status === "received").length.toString().padStart(2, "0")}</div><div className="metric-foot"><span className="metric-neutral">Em conferência</span><span className="metric-foot-label">RECEBIDOS</span></div></div>
+                <div className="metric-card"><div className="metric-top"><span>Concluídos</span><div className="metric-icon icon-green"><Check size={18}/></div></div><div className="metric-value">{tasks.filter(task => task.status === "completed").length.toString().padStart(2, "0")}</div><div className="metric-foot"><span className="metric-neutral">Trabalho encerrado</span><span className="metric-foot-label">FINALIZADOS</span></div></div>
+              </section>
+              <section className="content-card task-list-card">
+                <div className="client-toolbar task-toolbar">
+                  <div className="search-box"><Search size={17}/><input value={taskSearch} onChange={event => setTaskSearch(event.target.value)} placeholder="Buscar tarefa, cliente ou responsável..." aria-label="Buscar pendências"/>{taskSearch && <button onClick={() => setTaskSearch("")} aria-label="Limpar busca"><X size={15}/></button>}</div>
+                  <div className="filter-group task-status-filters" aria-label="Filtrar por situação">
+                    {([{value:"open",label:"Pendentes"},{value:"received",label:"Recebidos"},{value:"completed",label:"Concluídos"},{value:"all",label:"Todos"}] as const).map(filter => <button key={filter.value} className={taskFilter === filter.value ? "filter active" : "filter"} onClick={() => setTaskFilter(filter.value)}>{filter.label}<span>{filter.value === "all" ? tasks.length : tasks.filter(task => task.status === filter.value).length}</span></button>)}
+                  </div>
+                  <div className="task-client-filter"><label htmlFor="task-filter-client">Cliente</label><select id="task-filter-client" value={taskClientFilter} onChange={event => setTaskClientFilter(event.target.value)}><option value="all">Todos os clientes</option>{clients.map(client => <option key={client.id} value={client.id}>{client.trade_name || client.legal_name}</option>)}</select></div>
+                </div>
+                {tasksLoading ? <div className="loading-state"><div className="spinner"/><span>Carregando pendências...</span></div> : filteredTasks.length === 0 ? <div className="import-history-empty"><ClipboardList size={24}/><strong>Nenhuma pendência neste filtro</strong><p>Cadastre uma nova pendência ou ajuste os filtros.</p></div> : (
+                  <div className="task-list">
+                    {filteredTasks.map(task => {
+                      const primaryAction = task.status === "completed" || task.status === "cancelled"
+                        ? {label:"Reabrir", status:"open" as TaskStatus}
+                        : task.kind === "document" && task.status === "open"
+                          ? {label:"Marcar recebido", status:"received" as TaskStatus}
+                          : {label:"Concluir", status:"completed" as TaskStatus};
+                      const overdue = task.due_date && task.due_date < new Date().toISOString().slice(0,10) && !["completed","cancelled"].includes(task.status);
+                      const canEditTasks = ["owner", "admin", "accountant", "assistant"].includes(me.user.role);
+                      return <article className="task-row" key={task.id}>
+                        <div className="task-main">
+                          <div className="task-kind-icon">{task.kind === "document" ? <FileText size={18}/> : task.kind === "follow_up" ? <Users size={18}/> : <ClipboardList size={18}/>}</div>
+                          <div className="task-title-block"><strong>{task.title}</strong><span>{task.client_name}</span>{task.description && <p>{task.description}</p>}</div>
+                        </div>
+                        <div className="task-meta"><span className={`task-priority priority-${task.priority}`}>{taskPriorityLabels[task.priority]}</span><span className="task-kind-label">{taskKindLabels[task.kind]}</span></div>
+                        <div className="task-deadline"><CalendarDays size={14}/><span className={overdue ? "task-overdue" : ""}>{task.due_date ? formatDate(task.due_date) : "Sem prazo"}{overdue ? " · Atrasada" : ""}</span></div>
+                        <div className="task-assignee"><small>RESPONSÁVEL</small><span>{task.assigned_to_name || "Não atribuído"}</span></div>
+                        <div className="task-status-cell"><span className={`status-pill ${task.status === "completed" ? "status-active" : task.status === "open" ? "status-pending" : "status-archived"}`}><i/>{taskStatusLabels[task.status]}</span>{canEditTasks && <div className="task-actions"><button className="button button-secondary task-action-button" disabled={taskBusy} onClick={() => void handleUpdateTask(task.id, {status:primaryAction.status})}>{primaryAction.label}</button>{!["completed","cancelled"].includes(task.status) && <button className="text-button task-cancel-button" disabled={taskBusy} onClick={() => void handleUpdateTask(task.id, {status:"cancelled"})}>Cancelar</button>}</div>}</div>
+                      </article>;
+                    })}
+                  </div>
+                )}
+                <div className="table-footer"><span>Exibindo <strong>{filteredTasks.length}</strong> de <strong>{tasks.length}</strong> pendências</span><span>Dados do escritório autenticado</span></div>
+              </section>
+              <p className="permissions-note"><LockKeyhole size={14}/> As pendências são vinculadas a clientes e usuários do escritório autenticado. Alterações geram registro de auditoria; o sistema não dispara mensagens nem executa rotinas fiscais automaticamente.</p>
             </>
           ) : (
             <>
