@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -499,9 +500,10 @@ def download_client_import_xlsx_template(
     for column, width in widths.items():
         clients_sheet.column_dimensions[column].width = width
     for cell in clients_sheet[1]:
-        cell.font = __import__("openpyxl").styles.Font(bold=True, color="FFFFFF")
-        cell.fill = __import__("openpyxl").styles.PatternFill("solid", fgColor="5C55B7")
-    clients_sheet.column_dimensions["C"].number_format = "@"
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="5C55B7")
+    for row_number in range(2, 1002):
+        clients_sheet.cell(row=row_number, column=3).number_format = "@"
 
     instructions = workbook.create_sheet("Instruções")
     instructions.append(["Como usar o modelo de clientes"])
@@ -511,7 +513,7 @@ def download_client_import_xlsx_template(
     instructions.append(["4. Status aceita Ativo ou Arquivado; se vazio, será considerado Ativo."])
     instructions.append(["5. Salve como .xlsx e envie pelo menu Importações para revisar a prévia."])
     instructions.column_dimensions["A"].width = 105
-    instructions["A1"].font = __import__("openpyxl").styles.Font(bold=True, size=14)
+    instructions["A1"].font = Font(bold=True, size=14)
     workbook_buffer = BytesIO()
     workbook.save(workbook_buffer)
     workbook.close()
