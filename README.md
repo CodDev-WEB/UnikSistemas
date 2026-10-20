@@ -15,7 +15,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Gestão de equipe: criar usuários, consultar a equipe, alterar papéis e ativar/desativar acessos.
 - Perfis iniciais: responsável, administrador, contador(a), assistente e consulta (somente leitura).
 - Importação assistida de clientes por CSV/XLSX, com prévia, validação, detecção de duplicidades e confirmação explícita.
-- Auditoria inicial para criação de clientes, importações confirmadas e alterações de usuários.
+- Auditoria inicial para criação de clientes, importações confirmadas, alterações de usuários e recebimento/revisão de documentos.\n- Caixa de notificações por usuário, alertas diários de prazo e fila de e-mail SMTP opcional para a equipe.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
@@ -87,7 +87,7 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 ## Funcionalidades ainda não implementadas
 
 - Convites por e-mail, recuperação de senha e MFA.
-- Notificações automáticas ao cliente e rotinas contábeis automatizadas.
+- E-mails automáticos enviados aos clientes, convites por e-mail, recuperação de senha e MFA.\n- Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
@@ -115,6 +115,21 @@ Endpoints: `GET /api/v1/tasks?limit=100` com filtros opcionais `status` e `clien
 Este módulo é um controle operacional manual. Pendências do tipo Documento podem gerar um link temporário de envio: o link expira em 7 dias, admite até 5 arquivos e pode ser revogado pela equipe; a emissão de um novo link invalida o anterior. O portal aceita PDF, PNG, JPG, CSV, XLSX e DOCX, com limite de 10 MiB por arquivo e verificação básica do formato. A equipe autenticada pode baixar os anexos e registrar conferência ou pedido de correção; downloads, recebimentos e revisões geram auditoria. O recebimento não envia e-mails nem transmite declarações, calcula tributos ou executa prazos fiscais automaticamente.
 
 O armazenamento padrão usa volume persistente Docker (`document_uploads`) no caminho configurado por `DOCUMENT_STORAGE_PATH`. Antes de produção, configure HTTPS, limites de taxa, antivírus/inspeção de arquivos, política de retenção e backup testado. Não compartilhe links de envio em canais públicos; quem possui o link pode enviar arquivos para a pendência correspondente.
+
+
+## Central de notificações e alertas
+
+Acesse **Notificações** pela navegação lateral ou pelo ícone de sino. A caixa é pessoal: cada usuário vê apenas os próprios avisos, pode marcar um aviso ou todos como lidos e acompanha eventos de atribuição de pendências e recebimento de documentos.
+
+O worker dedicado verifica a cada minuto as pendências abertas ou recebidas com prazo até amanhã, no fuso configurado em `NOTIFICATION_TIMEZONE`. Um mesmo usuário recebe no máximo um lembrete por pendência por dia; tarefas concluídas ou canceladas não geram novos alertas. O responsável ou administrador também pode solicitar uma verificação imediata pela tela.
+
+O envio de e-mails é **desabilitado por padrão**. Para ativá-lo, configure no arquivo de ambiente do servidor: `EMAIL_NOTIFICATIONS_ENABLED=true`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_EMAIL` e, quando exigidos pelo provedor, `SMTP_USERNAME` e `SMTP_PASSWORD`. Use `SMTP_STARTTLS=true` para STARTTLS, que é a opção padrão na porta 587. Para SSL direto, habilite `SMTP_USE_SSL=true` e defina `SMTP_STARTTLS=false`. `APP_BASE_URL` deve apontar para a origem HTTPS real da aplicação e `NOTIFICATION_TIMEZONE` deve ser um fuso IANA válido. Nunca coloque credenciais SMTP no repositório.
+
+Quando a configuração está desligada, os avisos continuam aparecendo dentro do sistema e os registros de e-mail permanecem na fila; nenhum e-mail é enviado. Quando habilitado, o worker tenta enviar os e-mails aos usuários internos destinatários. Falhas ficam registradas para reenvio manual pelo responsável ou administrador depois da correção da configuração.
+
+Endpoints: `GET /api/v1/notifications?limit=50`, `GET /api/v1/notifications?unread_only=true`, `PATCH /api/v1/notifications/{notification_id}/read`, `POST /api/v1/notifications/read-all`, `GET /api/v1/notifications/email-status`, `POST /api/v1/notifications/process-due-reminders` e `POST /api/v1/notifications/{notification_id}/retry-email`. Os endpoints de fila e de lembretes manuais exigem o perfil responsável ou administrador; a caixa é sempre restrita ao usuário autenticado e ao escritório.
+
+Em execução local, acompanhe o worker com `docker compose logs -f notification-worker`. Antes de produção, faça um teste real com um destinatário interno autorizado, verifique entrega e spam e documente o procedimento de rotação de credenciais SMTP.
 
 ## Perfis de acesso
 
