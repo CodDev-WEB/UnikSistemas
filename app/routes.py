@@ -1,8 +1,11 @@
 import secrets
 
+from io import BytesIO
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
+from openpyxl import Workbook
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,6 +18,7 @@ from app.schemas import (
     ClientCreate,
     ClientRead,
     ClientImportBatchRead,
+    ClientImportHistoryRead,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -423,6 +427,101 @@ async def preview_client_import(
     return _serialize_import_batch(batch)
 
 
+
+
+
+@router.get(
+    "/imports/clients",
+    response_model=list[ClientImportHistoryRead],
+    tags=["Imports"],
+)
+def list_client_import_history(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return import batches for the currently authenticated office only."""
+    _require_client_editor(current_user)
+    records = db.execute(
+        select(ClientImportBatch, User.full_name)
+        .outerjoin(User, User.id == ClientImportBatch.created_by_user_id)
+        .where(ClientImportBatch.tenant_id == current_user.tenant_id)
+        .order_by(ClientImportBatch.created_at.desc(), ClientImportBatch.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "id": batch.id,
+            "filename": batch.filename,
+            "status": batch.status,
+            "total_rows": batch.total_rows,
+            "imported_count": batch.imported_count,
+            "created_by_name": creator_name,
+            "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "confirmed_at": batch.confirmed_at.isoformat() if batch.confirmed_at else None,
+        }
+        for batch, creator_name in records
+    ]
+
+
+@router.get("/imports/client-template.csv", tags=["Imports"])
+def download_client_import_csv_template(
+    current_user: User = Depends(get_current_user),
+):
+    """Download a minimal CSV template for client imports."""
+    _require_client_editor(current_user)
+    content = (
+        "\ufeffRazão Social;Nome Fantasia;CNPJ/CPF;E-mail;Telefone;Status\r\n"
+    )
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="unik-modelo-clientes.csv"'},
+    )
+
+
+@router.get("/imports/client-template.xlsx", tags=["Imports"])
+def download_client_import_xlsx_template(
+    current_user: User = Depends(get_current_user),
+):
+    """Download an Excel template with a clients tab and usage instructions."""
+    _require_client_editor(current_user)
+    workbook = Workbook()
+    clients_sheet = workbook.active
+    clients_sheet.title = "Clientes"
+    headers = ["Razão Social", "Nome Fantasia", "CNPJ/CPF", "E-mail", "Telefone", "Status"]
+    clients_sheet.append(headers)
+    clients_sheet.freeze_panes = "A2"
+    clients_sheet.auto_filter.ref = "A1:F1"
+    widths = {"A": 34, "B": 28, "C": 20, "D": 32, "E": 20, "F": 16}
+    for column, width in widths.items():
+        clients_sheet.column_dimensions[column].width = width
+    for cell in clients_sheet[1]:
+        cell.font = __import__("openpyxl").styles.Font(bold=True, color="FFFFFF")
+        cell.fill = __import__("openpyxl").styles.PatternFill("solid", fgColor="5C55B7")
+    clients_sheet.column_dimensions["C"].number_format = "@"
+
+    instructions = workbook.create_sheet("Instruções")
+    instructions.append(["Como usar o modelo de clientes"])
+    instructions.append(["1. Preencha uma linha para cada cliente na aba Clientes."])
+    instructions.append(["2. Razão Social é obrigatória; mantenha a primeira linha de títulos."])
+    instructions.append(["3. CNPJ/CPF deve ser formatado como texto para preservar zeros à esquerda."])
+    instructions.append(["4. Status aceita Ativo ou Arquivado; se vazio, será considerado Ativo."])
+    instructions.append(["5. Salve como .xlsx e envie pelo menu Importações para revisar a prévia."])
+    instructions.column_dimensions["A"].width = 105
+    instructions["A1"].font = __import__("openpyxl").styles.Font(bold=True, size=14)
+    workbook_buffer = BytesIO()
+    workbook.save(workbook_buffer)
+    workbook.close()
+    return Response(
+        content=workbook_buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="unik-modelo-clientes.xlsx"'},
+    )
+
+
 @router.get("/imports/clients/{batch_id}", response_model=ClientImportBatchRead, tags=["Imports"])
 def read_client_import_preview(
     batch_id: str,
@@ -463,7 +562,18 @@ def discard_client_import(
         raise HTTPException(status_code=404, detail="Importação não encontrada.")
     if batch.status == "confirmed":
         raise HTTPException(status_code=409, detail="A importação confirmada não pode ser descartada.")
-    db.delete(batch)
+    batch.status = "discarded"
+    batch.preview_rows = []
+    db.add(
+        AuditLog(
+            tenant_id=current_user.tenant_id,
+            actor_user_id=current_user.id,
+            action="clients.import.discarded",
+            entity_type="client_import",
+            entity_id=batch.id,
+            details={"filename": batch.filename},
+        )
+    )
     db.commit()
 
 
