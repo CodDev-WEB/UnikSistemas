@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     antivirus_host: str = "clamav"
     antivirus_port: int = Field(default=3310, ge=1, le=65535)
     antivirus_timeout_seconds: int = Field(default=45, ge=1, le=120)
+    antivirus_signature_max_age_hours: int = Field(default=72, ge=1, le=168)
+    antivirus_infected_retention_days: int = Field(default=30, ge=1, le=365)
+    antivirus_cleanup_interval_hours: int = Field(default=24, ge=1, le=168)
     email_notifications_enabled: bool = False
     smtp_host: str | None = None
     smtp_port: int = Field(default=587, ge=1, le=65535)
