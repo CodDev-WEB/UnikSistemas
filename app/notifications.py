@@ -153,7 +153,9 @@ def process_email_queue(db: Session, settings: Settings, limit: int = 50) -> dic
     return {"sent": sent, "failed": failed, "skipped": skipped}
 
 
-def enqueue_due_reminders(\n    db: Session, today: date, days_ahead: int = 1, tenant_id: str | None = None\n) -> dict[str, int]:
+def enqueue_due_reminders(
+    db: Session, today: date, days_ahead: int = 1, tenant_id: str | None = None
+) -> dict[str, int]:
     """Create at most one reminder per user/task/day for open or received work."""
     from datetime import timedelta
 
