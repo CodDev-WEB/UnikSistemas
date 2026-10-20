@@ -83,12 +83,19 @@ def _records_from_xlsx(content: bytes) -> tuple[list[object], Iterable[list[obje
     try:
         workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         worksheet = workbook.active
-        iterator = worksheet.iter_rows(values_only=True)
+        iterator = iter(worksheet.iter_rows(values_only=True))
         headers = list(next(iterator, ()))
-        rows = (list(row) for row in iterator)
-        return headers, rows
     except (BadZipFile, OSError, ValueError, KeyError) as exc:
         raise ValueError("Arquivo Excel inválido ou danificado.") from exc
+
+    def rows():
+        try:
+            for row in iterator:
+                yield list(row)
+        finally:
+            workbook.close()
+
+    return headers, rows()
 
 
 def parse_client_import(filename: str, content: bytes) -> list[dict]:
