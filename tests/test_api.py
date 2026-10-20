@@ -752,6 +752,13 @@ def test_client_task_rejects_invalid_values_and_missing_title(client: TestClient
     ).status_code == 422
 
 
+def _process_document_scans(client: TestClient, scanner) -> dict[str, int]:
+    from app.document_scan_worker import process_pending_scans
+
+    with client.app.state.test_sessionmaker() as db:
+        return process_pending_scans(db, client.app.state.test_settings, scanner=scanner)
+
+
 def test_public_document_upload_download_and_staff_review(client: TestClient):
     provision(client, "documentos-fluxo", "owner@example.com")
     token = login(client, "documentos-fluxo", "owner@example.com")
@@ -789,6 +796,16 @@ def test_public_document_upload_download_and_staff_review(client: TestClient):
     assert upload.status_code == 201, upload.text
     document_id = upload.json()["id"]
     assert upload.json()["review_status"] == "pending"
+    assert upload.json()["scan_status"] == "pending"
+    blocked_download = client.get(f"/api/v1/documents/{document_id}/download", headers=headers)
+    assert blocked_download.status_code == 423
+
+    scan_result = _process_document_scans(
+        client,
+        scanner=lambda _content, _host, _port, _timeout: "clean",
+    )
+    assert scan_result["clean"] == 1
+    assert scan_result["scanned"] == 1
 
     tasks = client.get("/api/v1/tasks?limit=100", headers=headers)
     assert tasks.status_code == 200
@@ -800,6 +817,7 @@ def test_public_document_upload_download_and_staff_review(client: TestClient):
     assert listing.json()[0]["original_filename"] == "extrato.pdf"
     assert listing.json()[0]["review_status"] == "pending"
     assert listing.json()[0]["file_size"] == len(pdf_bytes)
+    assert listing.json()[0]["scan_status"] == "clean"
 
     download = client.get(f"/api/v1/documents/{document_id}/download", headers=headers)
     assert download.status_code == 200
@@ -845,6 +863,93 @@ def test_document_upload_rejects_disguised_and_unsupported_files(client: TestCli
     assert fake_pdf.status_code == 422
     assert client.get(f"/api/v1/public/document-upload/{raw_token}").json()["remaining_uploads"] == 5
     assert client.get("/api/v1/documents", headers=headers).json() == []
+
+
+def test_infected_document_remains_quarantined_and_cannot_be_reviewed(client: TestClient):
+    provision(client, "documentos-infectados", "owner@example.com")
+    token = login(client, "documentos-infectados", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente arquivo suspeito")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Enviar documento", "kind": "document"},
+    )
+    link = client.post(f"/api/v1/tasks/{task.json()['id']}/upload-link", headers=headers).json()
+    raw_token = link["public_path"].rsplit("/", 1)[-1]
+    upload = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("suspeito.pdf", b"%PDF-1.7\nconteudo teste", "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+
+    result = _process_document_scans(
+        client,
+        scanner=lambda _content, _host, _port, _timeout: "infected",
+    )
+    assert result["infected"] == 1
+    documents = client.get("/api/v1/documents", headers=headers)
+    document = next(item for item in documents.json() if item["id"] == document_id)
+    assert document["scan_status"] == "infected"
+    assert client.get(f"/api/v1/documents/{document_id}/download", headers=headers).status_code == 423
+    assert client.patch(
+        f"/api/v1/documents/{document_id}",
+        headers=headers,
+        json={"review_status": "accepted"},
+    ).status_code == 409
+
+
+def test_scanner_errors_fail_closed_and_can_be_requeued_by_owner(client: TestClient):
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from app.models import ClientDocument, utcnow
+
+    provision(client, "documentos-scanner-offline", "owner@example.com")
+    token = login(client, "documentos-scanner-offline", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    company = create_client_record(client, token, "Cliente scanner offline")
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"client_id": company["id"], "title": "Enviar documento", "kind": "document"},
+    )
+    link = client.post(f"/api/v1/tasks/{task.json()['id']}/upload-link", headers=headers).json()
+    raw_token = link["public_path"].rsplit("/", 1)[-1]
+    upload = client.post(
+        f"/api/v1/public/document-upload/{raw_token}/files",
+        files={"file": ("aguardar.pdf", b"%PDF-1.7\nconteudo teste", "application/pdf")},
+    )
+    assert upload.status_code == 201, upload.text
+    document_id = upload.json()["id"]
+
+    def scanner_unavailable(_content, _host, _port, _timeout):
+        raise RuntimeError("clamd não respondeu")
+
+    for attempt in range(5):
+        _process_document_scans(client, scanner=scanner_unavailable)
+        with client.app.state.test_sessionmaker() as db:
+            document = db.get(ClientDocument, document_id)
+            if attempt < 4:
+                db.execute(
+                    update(ClientDocument)
+                    .where(ClientDocument.id == document_id)
+                    .values(scan_last_attempt_at=utcnow() - timedelta(minutes=2))
+                )
+            db.commit()
+
+    with client.app.state.test_sessionmaker() as db:
+        document = db.get(ClientDocument, document_id)
+        assert document.scan_status == "error"
+        assert document.scan_attempts == 5
+
+    assert client.get(f"/api/v1/documents/{document_id}/download", headers=headers).status_code == 423
+    retried = client.post(f"/api/v1/documents/{document_id}/retry-scan", headers=headers)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["scan_status"] == "pending"
+    assert retried.json()["scan_attempts"] == 0
 
 
 def test_document_upload_links_and_downloads_respect_tenant_and_role(client: TestClient):
