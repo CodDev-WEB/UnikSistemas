@@ -23,8 +23,7 @@ def run_helper(
         command.append(str(archive))
     return subprocess.run(
         command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         env=env,
         check=False,
     )
