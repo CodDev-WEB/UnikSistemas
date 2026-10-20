@@ -16,6 +16,9 @@ from app.schemas import (
     TenantBootstrapRequest,
     TenantBootstrapResponse,
     TokenResponse,
+    UserCreate,
+    UserUpdate,
+    UserRead,
 )
 from app.security import create_access_token, get_current_user, hash_password, verify_password
 
@@ -134,6 +137,9 @@ def create_client(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user.role not in {"owner", "admin", "accountant", "assistant"}:
+        raise HTTPException(status_code=403, detail="Seu perfil não permite cadastrar clientes.")
+
     new_client = Client(
         tenant_id=current_user.tenant_id,
         legal_name=payload.legal_name,
@@ -165,6 +171,155 @@ def create_client(
         ) from None
     db.refresh(new_client)
     return new_client
+
+
+
+
+MANAGE_USER_ROLES = {"owner", "admin"}
+VALID_STAFF_ROLES = {"admin", "accountant", "assistant", "viewer"}
+
+
+def _require_user_manager(user: User) -> None:
+    if user.role not in MANAGE_USER_ROLES:
+        raise HTTPException(status_code=403, detail="Seu perfil não permite administrar usuários.")
+
+
+def _record_user_audit(
+    db: Session,
+    actor: User,
+    action: str,
+    subject: User,
+    changed_fields: list[str],
+) -> None:
+    db.add(
+        AuditLog(
+            tenant_id=actor.tenant_id,
+            actor_user_id=actor.id,
+            action=action,
+            entity_type="user",
+            entity_id=subject.id,
+            details={"fields": sorted(changed_fields)},
+        )
+    )
+
+
+@router.get("/users", response_model=list[UserRead], tags=["Users"])
+def list_users(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_user_manager(current_user)
+    return list(
+        db.scalars(
+            select(User)
+            .where(User.tenant_id == current_user.tenant_id)
+            .order_by(User.role, User.full_name, User.id)
+        ).all()
+    )
+
+
+@router.post(
+    "/users",
+    response_model=UserRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Users"],
+)
+def create_user(
+    payload: UserCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_user_manager(current_user)
+    if current_user.role == "admin" and payload.role == "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Somente o responsável do escritório pode criar administradores.",
+        )
+
+    user = User(
+        tenant_id=current_user.tenant_id,
+        email=str(payload.email).lower(),
+        full_name=payload.full_name,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        is_active=True,
+    )
+    try:
+        db.add(user)
+        db.flush()
+        _record_user_audit(db, current_user, "user.created", user, ["email", "full_name", "role"])
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe um usuário com esse e-mail neste escritório.",
+        ) from None
+
+    db.refresh(user)
+    return user
+
+
+@router.patch("/users/{user_id}", response_model=UserRead, tags=["Users"])
+def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_user_manager(current_user)
+    user = db.scalar(
+        select(User).where(User.id == user_id, User.tenant_id == current_user.tenant_id)
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Informe ao menos um campo para atualizar.")
+    if any(value is None for value in changes.values()):
+        raise HTTPException(status_code=422, detail="Os campos enviados não podem ser nulos.")
+
+    if user.id == current_user.id and ({"role", "is_active"} & changes.keys()):
+        raise HTTPException(
+            status_code=403,
+            detail="Você não pode alterar o próprio perfil nem desativar o próprio acesso.",
+        )
+    if user.role == "owner" and user.id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="O usuário responsável não pode ser alterado por outro usuário.",
+        )
+    if current_user.role == "admin":
+        if user.role == "admin" and user.id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Administradores não podem alterar outros administradores.",
+            )
+        if changes.get("role") == "admin":
+            raise HTTPException(
+                status_code=403,
+                detail="Somente o responsável do escritório pode atribuir o perfil administrador.",
+            )
+
+    old_active = user.is_active
+    for field, value in changes.items():
+        setattr(user, field, value)
+
+    if "is_active" in changes and changes["is_active"] != old_active:
+        action = "user.activated" if changes["is_active"] else "user.deactivated"
+    else:
+        action = "user.updated"
+
+    try:
+        _record_user_audit(db, current_user, action, user, list(changes.keys()))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Não foi possível atualizar o usuário.") from None
+
+    db.refresh(user)
+    return user
 
 
 @router.get("/clients/{client_id}", response_model=ClientRead, tags=["Clients"])

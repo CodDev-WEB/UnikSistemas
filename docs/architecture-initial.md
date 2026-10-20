@@ -24,13 +24,31 @@
 | GET | /api/v1/clients | Lista clientes somente do tenant autenticado |
 | POST | /api/v1/clients | Cria cliente e gera evento de auditoria |
 | GET | /api/v1/clients/{client_id} | Consulta um cliente dentro do tenant autenticado |
+| GET | /api/v1/users | Lista usuários do próprio escritório (responsável/administrador) |
+| POST | /api/v1/users | Cria usuário no escritório com perfil permitido |
+| PATCH | /api/v1/users/{user_id} | Atualiza nome, perfil ou estado do acesso dentro do mesmo tenant |
+
+## Matriz inicial de permissões
+
+| Perfil | Listar/consultar clientes | Cadastrar clientes | Gerenciar usuários |
+|---|---:|---:|---:|
+| owner | Sim | Sim | Sim |
+| admin | Sim | Sim | Sim, exceto owner e outros admins |
+| accountant | Sim | Sim | Não |
+| assistant | Sim | Sim | Não |
+| viewer | Sim | Não | Não |
+
+- O tenant é derivado do token validado no backend; não é aceito do corpo da requisição para gestão de usuários/clientes.
+- Um administrador não pode criar outro administrador, administrar o responsável nem desativar o próprio acesso.
+- O responsável não pode desativar a própria conta. Alterações de usuário registram evento de auditoria.
+- O endpoint de gestão não aceita atribuir o perfil owner; o provisionamento inicial continua separado e protegido por segredo operacional.
 
 ## Limites conhecidos
 
 Esta entrega é uma fundação, não um sistema contábil pronto para produção.
 
 - Provisionamento de tenant exige segredo operacional. Remova ou rotacione BOOTSTRAP_TOKEN após o provisionamento quando não for necessário.
-- Ainda não existe recuperação de senha, MFA, gestão completa de usuários/perfis, rate limiting, fila de tarefas, frontend ou integrações fiscais.
+- Ainda não existe recuperação de senha, MFA, convites por e-mail, rate limiting, fila de tarefas ou integrações fiscais.
 - Auditoria inicial cobre criação de clientes; precisa ser ampliada e protegida conforme requisitos de auditoria.
 - Não há validação de dígitos verificadores nem consulta oficial para identificadores fiscais.
 - Antes de uso público, adicionar rate limiting, secret manager, HTTPS/reverse proxy, monitoramento, backups/restauração e revisão de segurança.

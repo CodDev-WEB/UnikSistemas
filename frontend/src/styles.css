@@ -240,3 +240,155 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
   .login-panel { width: calc(100% - 38px); }
   .login-panel .brand-lockup { margin-bottom: 40px; }
 }
+
+
+/* Team and access management */
+.field select,
+.team-role select {
+  border: 1px solid #e3e5ef;
+  background: #fff;
+  border-radius: 9px;
+  color: #4d5268;
+  width: 100%;
+  padding: 11px 12px;
+  font-size: 11px;
+}
+.field select:focus,
+.team-role select:focus {
+  outline: none;
+  border-color: #8d86ee;
+  box-shadow: 0 0 0 3px #f0efff;
+}
+.role-explainer {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.role-explainer > div {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 15px 13px;
+  border: 1px solid #e9ebf3;
+  background: #fff;
+  border-radius: 12px;
+  color: #7068d8;
+}
+.role-explainer > div > svg { flex: 0 0 auto; margin-top: 2px; }
+.role-explainer strong { display: block; font-size: 10px; color: #3a3e52; }
+.role-explainer span { display: block; margin-top: 6px; color: #969bad; font-size: 9px; line-height: 1.55; }
+.team-card-icon {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+  background: #efeeff;
+  color: #655cdb;
+  flex: 0 0 auto;
+}
+.security-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dcefe7;
+  background: #f5fbf8;
+  color: #39846b;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.team-list { padding: 0 20px 6px; }
+.team-row {
+  display: grid;
+  grid-template-columns: 40px minmax(130px, 1.5fr) minmax(120px, .8fr) 100px minmax(115px, auto);
+  align-items: center;
+  gap: 13px;
+  min-height: 72px;
+  border-top: 1px solid #f0f1f6;
+}
+.team-avatar {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: #efefff;
+  color: #665dd3;
+  font-weight: 700;
+  font-size: 11px;
+}
+.team-person { min-width: 0; }
+.team-person strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #383c50;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.team-person small {
+  display: block;
+  color: #9a9fb0;
+  font-size: 10px;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.you-label {
+  color: #736bd9;
+  background: #f0efff;
+  border-radius: 4px;
+  padding: 3px 4px;
+  font-size: 7px;
+  letter-spacing: .5px;
+}
+.team-role { min-width: 0; }
+.team-role select { padding: 8px 7px; font-size: 10px; }
+.role-pill {
+  display: inline-flex;
+  max-width: 100%;
+  background: #f2f2fa;
+  color: #777c91;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.team-action { padding: 8px 10px; font-size: 9px; }
+.team-protected {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  color: #a0a5b5;
+  font-size: 9px;
+}
+.permissions-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #9096a9;
+  font-size: 10px;
+  line-height: 1.65;
+  margin: 15px 2px 0;
+}
+.permissions-note svg { flex: 0 0 auto; margin-top: 1px; color: #7d75dc; }
+@media (max-width: 1100px) {
+  .role-explainer { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .team-row { grid-template-columns: 38px minmax(110px, 1fr) minmax(110px, .8fr) 90px; }
+  .team-action, .team-protected { grid-column: 2 / -1; justify-self: start; margin-bottom: 10px; }
+}
+@media (max-width: 600px) {
+  .role-explainer { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .role-explainer > div { padding: 11px 9px; gap: 7px; }
+  .team-list { padding: 0 13px 5px; }
+  .team-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 9px; padding: 12px 0; }
+  .team-person { grid-column: 2 / 4; grid-row: 1; }
+  .team-role { grid-column: 2; grid-row: 2; }
+  .team-row > .status-pill { grid-column: 3; grid-row: 2; justify-self: end; }
+  .team-action, .team-protected { grid-column: 2 / 4; grid-row: 3; margin: 0; }
+  .team-action { justify-self: start; }
+  .security-chip { display: none; }
+}

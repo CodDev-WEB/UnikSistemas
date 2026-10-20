@@ -105,3 +105,31 @@ class ClientRead(BaseModel):
     @classmethod
     def serialize_datetime(cls, value):
         return value.isoformat() if value is not None else None
+
+
+class UserCreate(BaseModel):
+    full_name: str = Field(min_length=2, max_length=160)
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+    role: Literal["admin", "accountant", "assistant", "viewer"] = "accountant"
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("email")
+    @classmethod
+    def normalize_user_email(cls, value: EmailStr) -> str:
+        return str(value).strip().lower()
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=160)
+    role: Literal["admin", "accountant", "assistant", "viewer"] | None = None
+    is_active: bool | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize_updated_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
