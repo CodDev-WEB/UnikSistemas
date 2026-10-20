@@ -4,7 +4,7 @@ import re
 import socket
 import struct
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 CHUNK_SIZE = 64 * 1024
 MAX_REPLY_BYTES = 4096
@@ -95,7 +95,7 @@ def parse_clamd_version(reply: str) -> ClamAVInfo:
     if match is None:
         raise AntivirusError("Não foi possível validar a versão e a data das assinaturas do ClamAV.")
     try:
-        build_date = datetime.strptime(match.group(3), "%a %b %d %H:%M:%S %Y").replace(tzinfo=timezone.utc)
+        build_date = datetime.strptime(match.group(3), "%a %b %d %H:%M:%S %Y").replace(tzinfo=UTC)
     except ValueError as exc:
         raise AntivirusError("A data das assinaturas do ClamAV é inválida.") from exc
     return ClamAVInfo(
@@ -116,9 +116,9 @@ def signature_status(
     max_age_hours: int,
 ) -> tuple[str, str | None]:
     """Return healthy only when the signature build time can be verified and is fresh."""
-    current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-    built = database_date if database_date.tzinfo else database_date.replace(tzinfo=timezone.utc)
-    age = current.astimezone(timezone.utc) - built.astimezone(timezone.utc)
+    current = now if now.tzinfo else now.replace(tzinfo=UTC)
+    built = database_date if database_date.tzinfo else database_date.replace(tzinfo=UTC)
+    age = current.astimezone(UTC) - built.astimezone(UTC)
     if age < timedelta(hours=-6):
         return "signatures_stale", "A data do banco de assinaturas está no futuro e não pode ser validada."
     if age > timedelta(hours=max_age_hours):
