@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: unik
       POSTGRES_USER: unik
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-unik_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set_POSTGRES_PASSWORD_in_.env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://unik:unik_dev_password@db:5432/unik}
+      DATABASE_URL: ${DATABASE_URL:?Set_DATABASE_URL_in_.env}
     depends_on:
       db:
         condition: service_healthy
@@ -51,7 +51,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://unik:unik_dev_password@db:5432/unik}
+      DATABASE_URL: ${DATABASE_URL:?Set_DATABASE_URL_in_.env}
     command: ["python", "-m", "app.notification_worker"]
     depends_on:
       api:

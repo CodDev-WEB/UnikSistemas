@@ -32,11 +32,11 @@ Consulte a [arquitetura inicial](docs/architecture-initial.md) e o [briefing do 
 ## Executar localmente
 
 1. Copie `.env.example` para `.env`.
-2. Troque `SECRET_KEY` e `BOOTSTRAP_TOKEN` por valores aleatórios fortes. Nunca use os valores de exemplo fora do desenvolvimento local.
+2. Troque `SECRET_KEY`, `BOOTSTRAP_TOKEN` e `POSTGRES_PASSWORD` por valores aleatórios fortes. Atualize também a senha na `DATABASE_URL`; os dois valores precisam corresponder. Para evitar erros de codificação da URL, prefira uma senha aleatória alfanumérica longa ou codifique os caracteres reservados. Nunca use os valores de exemplo em qualquer ambiente compartilhado.
 3. Inicie a API, PostgreSQL e frontend:
 
     docker compose up --build -d
-    docker compose logs -f api frontend
+    docker compose logs -f api frontend notification-worker
 
 4. Acesse a interface em <http://127.0.0.1:3000> e a documentação da API em <http://127.0.0.1:8000/docs>.
 
@@ -92,7 +92,7 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 - Limites de requisição, rate limiting, observabilidade avançada e procedimento validado de backup/restauração.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 
-Não exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
+O perfil de produção também exige PostgreSQL via `postgresql+psycopg` e senha de banco com ao menos 24 caracteres; as rotas de documentação OpenAPI são desativadas nesse perfil. O Nginx aplica cabeçalhos básicos de proteção no navegador, mas o proxy de borda ainda deve terminar TLS/HTTPS e aplicar HSTS.\n\nNão exponha a aplicação à internet antes de implementar e revisar esses controles. Use dados fictícios nos testes e não envie dados de clientes a modelos de IA sem avaliar previamente as condições de tratamento aplicáveis.
 
 ## Importação assistida de clientes
 

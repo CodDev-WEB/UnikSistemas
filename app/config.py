@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import EmailStr, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 class Settings(BaseSettings):
@@ -51,6 +53,21 @@ class Settings(BaseSettings):
             if self.smtp_use_ssl and self.smtp_starttls:
                 raise ValueError("SMTP_USE_SSL e SMTP_STARTTLS não podem estar habilitados juntos.")
         if self.app_env == "production":
+            try:
+                database_url = make_url(self.database_url)
+            except ArgumentError as exc:
+                raise ValueError("DATABASE_URL inválida para produção.") from exc
+            if database_url.drivername != "postgresql+psycopg":
+                raise ValueError("Em produção, DATABASE_URL deve usar PostgreSQL com o driver psycopg.")
+            db_password = database_url.password or ""
+            if len(db_password) < 24 or db_password.casefold() in {
+                "unik_dev_password",
+                "replace-with-a-long-random-password",
+                "password",
+                "postgres",
+                "changeme",
+            }:
+                raise ValueError("A senha do banco em produção deve ser aleatória e ter pelo menos 24 caracteres.")
             if len(self.secret_key) < 32 or self.secret_key.startswith("dev-only"):
                 raise ValueError("Em produção, SECRET_KEY deve ter pelo menos 32 caracteres aleatórios.")
             if self.bootstrap_token and len(self.bootstrap_token) < 32:

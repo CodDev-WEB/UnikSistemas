@@ -59,3 +59,13 @@ jobs:
         run: npm install
       - name: Build frontend
         run: npm run build
+
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
