@@ -870,11 +870,23 @@ def test_document_upload_links_and_downloads_respect_tenant_and_role(client: Tes
     )
     assert upload.status_code == 201, upload.text
     document_id = upload.json()["id"]
+    owner_notifications = client.get("/api/v1/notifications", headers=headers_a)
+    assert owner_notifications.status_code == 200, owner_notifications.text
+    received_notice = next(
+        item for item in owner_notifications.json() if item["event_type"] == "document_received"
+    )
+    assert received_notice["entity_id"] == document_id
+    assert "privado.pdf" in received_notice["message"]
 
     provision(client, "documentos-tenant-b", "owner-b@example.com")
     token_b = login(client, "documentos-tenant-b", "owner-b@example.com")
     headers_b = {"Authorization": f"Bearer {token_b}"}
     assert client.get("/api/v1/documents", headers=headers_b).json() == []
+    assert client.get("/api/v1/notifications", headers=headers_b).json() == []
+    assert client.patch(
+        f"/api/v1/notifications/{received_notice['id']}/read",
+        headers=headers_b,
+    ).status_code == 404
     assert client.get(f"/api/v1/documents/{document_id}/download", headers=headers_b).status_code == 404
 
     create_user(client, token_a, "consulta@example.com", "viewer")
