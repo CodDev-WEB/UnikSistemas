@@ -9,17 +9,20 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.client_imports import canonical_tax_id, parse_client_import, validate_import_rows
-from app.models import AuditLog, Client, ClientImportBatch, Tenant, User, utcnow
+from app.models import AuditLog, Client, ClientImportBatch, ClientTask, Tenant, User, utcnow
 from app.schemas import (
     ClientCreate,
     ClientRead,
     ClientImportBatchRead,
     ClientImportHistoryRead,
+    ClientTaskCreate,
+    ClientTaskRead,
+    ClientTaskUpdate,
     LoginRequest,
     MeResponse,
     TenantBootstrapRequest,
@@ -676,3 +679,228 @@ def confirm_client_import(
         ) from None
     db.refresh(batch)
     return _serialize_import_batch(batch)
+
+
+
+TASK_EDITOR_ROLES = {"owner", "admin", "accountant", "assistant"}
+
+
+def _require_task_editor(user: User) -> None:
+    if user.role not in TASK_EDITOR_ROLES:
+        raise HTTPException(status_code=403, detail="Seu perfil permite apenas consultar as pendências.")
+
+
+def _task_snapshot_query():
+    assigned_user = aliased(User)
+    creator_user = aliased(User)
+    return (
+        select(
+            ClientTask,
+            Client.legal_name.label("client_name"),
+            assigned_user.full_name.label("assigned_to_name"),
+            creator_user.full_name.label("created_by_name"),
+        )
+        .join(Client, Client.id == ClientTask.client_id)
+        .outerjoin(assigned_user, assigned_user.id == ClientTask.assigned_to_user_id)
+        .outerjoin(creator_user, creator_user.id == ClientTask.created_by_user_id)
+    )
+
+
+def _serialize_task_record(record) -> dict:
+    task, client_name, assigned_to_name, created_by_name = record
+    return {
+        "id": task.id,
+        "client_id": task.client_id,
+        "client_name": client_name,
+        "title": task.title,
+        "description": task.description,
+        "kind": task.kind,
+        "priority": task.priority,
+        "status": task.status,
+        "due_date": task.due_date,
+        "assigned_to_user_id": task.assigned_to_user_id,
+        "assigned_to_name": assigned_to_name,
+        "created_by_user_id": task.created_by_user_id,
+        "created_by_name": created_by_name,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
+def _read_task(db: Session, task_id: str, tenant_id: str):
+    record = db.execute(
+        _task_snapshot_query().where(
+            ClientTask.id == task_id,
+            ClientTask.tenant_id == tenant_id,
+        )
+    ).one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+    return record
+
+
+def _validate_task_assignment(db: Session, user_id: str | None, tenant_id: str) -> User | None:
+    if user_id is None:
+        return None
+    assigned = db.scalar(
+        select(User).where(
+            User.id == user_id,
+            User.tenant_id == tenant_id,
+            User.is_active.is_(True),
+        )
+    )
+    if assigned is None:
+        raise HTTPException(
+            status_code=422,
+            detail="O responsável precisa ser um usuário ativo deste escritório.",
+        )
+    return assigned
+
+
+@router.get("/tasks", response_model=list[ClientTaskRead], tags=["Tasks"])
+def list_client_tasks(
+    status_filter: str | None = Query(
+        default=None,
+        alias="status",
+        pattern="^(open|received|completed|cancelled)$",
+    ),
+    client_id: str | None = Query(default=None, min_length=1, max_length=36),
+    limit: int = Query(default=100, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List tasks and document requests scoped to the authenticated office."""
+    statement = _task_snapshot_query().where(ClientTask.tenant_id == current_user.tenant_id)
+    if status_filter is not None:
+        statement = statement.where(ClientTask.status == status_filter)
+    if client_id is not None:
+        statement = statement.where(
+            ClientTask.client_id == client_id,
+            Client.tenant_id == current_user.tenant_id,
+        )
+    records = db.execute(
+        statement.order_by(
+            ClientTask.due_date.is_(None),
+            ClientTask.due_date.asc(),
+            ClientTask.created_at.desc(),
+        ).limit(limit)
+    ).all()
+    return [_serialize_task_record(record) for record in records]
+
+
+@router.post(
+    "/tasks",
+    response_model=ClientTaskRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Tasks"],
+)
+def create_client_task(
+    payload: ClientTaskCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_task_editor(current_user)
+    target_client = db.scalar(
+        select(Client).where(
+            Client.id == payload.client_id,
+            Client.tenant_id == current_user.tenant_id,
+        )
+    )
+    if target_client is None:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado neste escritório.")
+
+    assignee_id = payload.assigned_to_user_id or current_user.id
+    _validate_task_assignment(db, assignee_id, current_user.tenant_id)
+    task = ClientTask(
+        tenant_id=current_user.tenant_id,
+        client_id=target_client.id,
+        created_by_user_id=current_user.id,
+        assigned_to_user_id=assignee_id,
+        title=payload.title,
+        description=payload.description,
+        kind=payload.kind,
+        priority=payload.priority,
+        due_date=payload.due_date,
+        status="open",
+    )
+    try:
+        db.add(task)
+        db.flush()
+        db.add(
+            AuditLog(
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="task.created",
+                entity_type="client_task",
+                entity_id=task.id,
+                details={
+                    "client_id": task.client_id,
+                    "kind": task.kind,
+                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                },
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Não foi possível registrar a pendência.") from None
+    return _serialize_task_record(_read_task(db, task.id, current_user.tenant_id))
+
+
+@router.patch("/tasks/{task_id}", response_model=ClientTaskRead, tags=["Tasks"])
+def update_client_task(
+    task_id: str,
+    payload: ClientTaskUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_task_editor(current_user)
+    task = db.scalar(
+        select(ClientTask).where(
+            ClientTask.id == task_id,
+            ClientTask.tenant_id == current_user.tenant_id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="Pendência não encontrada.")
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="Informe ao menos um campo para atualizar.")
+    nullable_fields = {"description", "due_date", "assigned_to_user_id"}
+    if any(value is None and field not in nullable_fields for field, value in changes.items()):
+        raise HTTPException(status_code=422, detail="Campos obrigatórios não podem ser nulos.")
+
+    if "assigned_to_user_id" in changes and changes["assigned_to_user_id"] is not None:
+        _validate_task_assignment(db, changes["assigned_to_user_id"], current_user.tenant_id)
+
+    previous_status = task.status
+    previous_due_date = task.due_date
+    for field, value in changes.items():
+        setattr(task, field, value)
+    task.updated_at = utcnow()
+    if "status" in changes and changes["status"] != previous_status:
+        task.completed_at = utcnow() if changes["status"] == "completed" else None
+
+    try:
+        db.add(
+            AuditLog(
+                tenant_id=current_user.tenant_id,
+                actor_user_id=current_user.id,
+                action="task.updated",
+                entity_type="client_task",
+                entity_id=task.id,
+                details={
+                    "fields": sorted(changes),
+                    "previous_status": previous_status,
+                    "status": task.status,
+                    "previous_due_date": previous_due_date.isoformat() if previous_due_date else None,
+                    "due_date": task.due_date.isoformat() if task.due_date else None,
+                },
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Não foi possível atualizar a pendência.") from None
+    return _serialize_task_record(_read_task(db, task.id, current_user.tenant_id))
