@@ -53,8 +53,8 @@ def test_archive_round_trip_replaces_volume_contents(tmp_path: Path):
     check = run_helper("check", source, archive_file)
     assert check.returncode == 0, check.stderr.decode()
 
-    destination = tmp_path / "destination"
-    destination.mkdir()
+    destination = tmp_path / "destination-root" / "uploads"
+    destination.mkdir(parents=True)
     (destination / "stale.txt").write_text("must be removed", encoding="utf-8")
     restored = run_helper("restore", destination, archive_file)
     assert restored.returncode == 0, restored.stderr.decode()
@@ -64,8 +64,8 @@ def test_archive_round_trip_replaces_volume_contents(tmp_path: Path):
 
 
 def test_restore_rejects_path_traversal_before_clearing_current_files(tmp_path: Path):
-    destination = tmp_path / "destination"
-    destination.mkdir()
+    destination = tmp_path / "destination-root" / "uploads"
+    destination.mkdir(parents=True)
     sentinel = destination / "keep.txt"
     sentinel.write_text("current data", encoding="utf-8")
     escaped = tmp_path / "escaped.txt"
@@ -81,8 +81,8 @@ def test_restore_rejects_path_traversal_before_clearing_current_files(tmp_path: 
 
 
 def test_restore_rejects_links_before_clearing_current_files(tmp_path: Path):
-    destination = tmp_path / "destination"
-    destination.mkdir()
+    destination = tmp_path / "destination-root" / "uploads"
+    destination.mkdir(parents=True)
     sentinel = destination / "keep.txt"
     sentinel.write_text("current data", encoding="utf-8")
 
