@@ -1219,6 +1219,88 @@ def test_notifications_are_private_to_user_and_tenant(client: TestClient):
     ).status_code == 404
 
 
+def test_old_email_backlog_expires_until_admin_explicitly_requeues(client: TestClient, monkeypatch):
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app import notifications as notification_service
+    from app.config import get_settings
+    from app.models import AuditLog, Notification, User, utcnow
+    from app.notifications import process_email_queue, queue_notification
+
+    provision(client, "email-backlog", "owner@example.com")
+    token = login(client, "email-backlog", "owner@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    now = utcnow()
+
+    with client.app.state.test_sessionmaker() as db:
+        owner = db.scalar(select(User).where(User.email == "owner@example.com"))
+        assert owner is not None
+        notice = queue_notification(
+            db,
+            tenant_id=owner.tenant_id,
+            recipient_user_id=owner.id,
+            event_key="stale-email-test",
+            event_type="task_due",
+            title="Lembrete antigo",
+            message="Este aviso foi criado antes de SMTP ser habilitado.",
+            entity_type="client_task",
+            entity_id="task-antiga",
+        )
+        assert notice is not None
+        db.flush()
+        notice_id = notice.id
+        notice.email_queued_at = now - timedelta(hours=48)
+        db.commit()
+
+    ready_settings = client.app.state.test_settings.model_copy(
+        update={
+            "email_notifications_enabled": True,
+            "smtp_host": "smtp.example.com",
+            "smtp_from_email": "alerts@example.com",
+            "email_queue_max_age_hours": 24,
+        }
+    )
+    client.app.dependency_overrides[get_settings] = lambda: ready_settings
+    sends = []
+    monkeypatch.setattr(notification_service, "_send_email", lambda *args: sends.append(args))
+
+    with client.app.state.test_sessionmaker() as db:
+        result = process_email_queue(db, ready_settings, now=now)
+
+    assert result == {"sent": 0, "failed": 0, "skipped": 0, "expired": 1}
+    assert sends == []
+    with client.app.state.test_sessionmaker() as db:
+        notice = db.get(Notification, notice_id)
+        assert notice is not None
+        assert notice.email_status == "failed"
+        assert notice.email_last_error == "fila_expirada_requer_reenvio_manual"
+        assert notice.email_attempts == 0
+
+    status_response = client.get("/api/v1/notifications/email-status", headers=headers)
+    assert status_response.status_code == 200, status_response.text
+    assert status_response.json()["expired"] == 1
+    assert status_response.json()["max_queue_age_hours"] == 24
+
+    retried = client.post(f"/api/v1/notifications/{notice_id}/retry-email", headers=headers)
+    assert retried.status_code == 200, retried.text
+    with client.app.state.test_sessionmaker() as db:
+        notice = db.get(Notification, notice_id)
+        assert notice is not None
+        assert notice.email_status == "pending"
+        assert notice.email_last_error is None
+        assert notice.email_queued_at >= now - timedelta(minutes=1)
+        audits = db.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "notification.email_retry_requested",
+                AuditLog.entity_id == notice_id,
+            )
+        ).all()
+        assert len(audits) == 1
+        assert audits[0].details["reason"] == "explicit_manual_retry"
+
+
 def test_due_reminders_are_idempotent_and_only_cover_open_work(client: TestClient):
     provision(client, "lembretes-prazos", "owner@example.com")
     token = login(client, "lembretes-prazos", "owner@example.com")
