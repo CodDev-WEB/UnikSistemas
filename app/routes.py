@@ -1020,8 +1020,18 @@ def create_document_upload_link(
             detail="O link só pode ser criado para uma solicitação de documento em aberto.",
         )
 
+    now = utcnow()
+    previous_links = db.scalars(
+        select(DocumentUploadLink).where(
+            DocumentUploadLink.tenant_id == current_user.tenant_id,
+            DocumentUploadLink.task_id == task.id,
+            DocumentUploadLink.revoked_at.is_(None),
+        )
+    ).all()
+    for previous_link in previous_links:
+        previous_link.revoked_at = now
     raw_token = secrets.token_urlsafe(32)
-    expiry = utcnow() + timedelta(days=LINK_LIFETIME_DAYS)
+    expiry = now + timedelta(days=LINK_LIFETIME_DAYS)
     link = DocumentUploadLink(
         tenant_id=current_user.tenant_id,
         task_id=task.id,
@@ -1044,6 +1054,7 @@ def create_document_upload_link(
     )
     db.commit()
     return DocumentUploadLinkRead(
+        id=link.id,
         public_path=f"/document-upload/{raw_token}",
         expires_at=expiry.isoformat(),
         max_uploads=MAX_UPLOADS_PER_LINK,
