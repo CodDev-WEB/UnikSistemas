@@ -1,7 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -104,3 +104,37 @@ class ClientImportBatch(Base):
     imported_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+
+class ClientTask(Base):
+    __tablename__ = "client_tasks"
+    __table_args__ = (
+        Index("ix_client_tasks_tenant_status_due", "tenant_id", "status", "due_date"),
+        Index("ix_client_tasks_tenant_client_created", "tenant_id", "client_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    client_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    assigned_to_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="document")
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="normal")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
