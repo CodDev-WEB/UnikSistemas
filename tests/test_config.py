@@ -28,19 +28,19 @@ def test_email_notifications_require_host_and_sender_when_enabled():
 
     settings = make_settings(
         email_notifications_enabled=True,
-        smtp_host="smtp.example.test",
-        smtp_from_email="alerts@example.test",
+        smtp_host="smtp.example.com",
+        smtp_from_email="alerts@example.com",
     )
     assert settings.email_notifications_enabled is True
-    assert settings.smtp_host == "smtp.example.test"
+    assert settings.smtp_host == "smtp.example.com"
 
 
 def test_smtp_ssl_and_starttls_cannot_be_enabled_together():
     with pytest.raises(ValidationError, match="não podem estar habilitados juntos"):
         make_settings(
             email_notifications_enabled=True,
-            smtp_host="smtp.example.test",
-            smtp_from_email="alerts@example.test",
+            smtp_host="smtp.example.com",
+            smtp_from_email="alerts@example.com",
             smtp_use_ssl=True,
             smtp_starttls=True,
         )
