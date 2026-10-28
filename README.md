@@ -19,6 +19,8 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Recebimento público em quarentena com análise ClamAV assíncrona; downloads e conferência ficam bloqueados até o resultado limpo.
 - Caixa de notificações por usuário, alertas diários de prazo e fila de e-mail SMTP opcional para a equipe.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
+- Lockfile npm versionado; CI e imagem Docker usam `npm ci` para instalação reproduzível do frontend.
+- Análise CodeQL e atualização automatizada de dependências via Dependabot, incluindo pacotes npm do frontend.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
 
@@ -85,7 +87,7 @@ Backend:
 Frontend:
 
     cd frontend
-    npm install
+    npm ci
     npm run build
 
 O CI executa lint, testes do backend e migração contra PostgreSQL, além de compilar o frontend.
