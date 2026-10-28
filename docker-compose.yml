@@ -157,7 +157,7 @@ services:
     volumes:
       - ./ops/grafana/entrypoint.sh:/opt/unik-entrypoint.sh:ro
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./ops/grafana/dashboards:/etc/unik/dashboards:ro
       - grafana_data:/var/lib/grafana
     read_only: true
     tmpfs:
