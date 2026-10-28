@@ -46,8 +46,8 @@ def test_metrics_endpoint_requires_bearer_token_and_reports_aggregate_health(cli
     assert 'unik_antivirus_health_status{status="healthy"} 1' in response.text
     assert 'unik_antivirus_health_status{status="unavailable"} 0' in response.text
     assert "unik_antivirus_signature_database_known 1" in response.text
-    assert 'unik_documents_scan_status_total{status="pending"} 0' in response.text
-    assert 'unik_notification_email_status_total{status="failed"} 0' in response.text
+    assert 'unik_documents_scan_status_count{status="pending"} 0' in response.text
+    assert 'unik_notification_email_status_count{status="failed"} 0' in response.text
     assert "signature_database_version" not in response.text
     assert "28765" not in response.text
     assert "metrics-token" not in response.text
