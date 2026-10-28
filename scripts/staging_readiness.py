@@ -25,7 +25,6 @@ REQUIRED_SERVICES = {
     "notification-worker",
 }
 REVISION_RE = re.compile(r"^([A-Za-z0-9_]+)(?:\s+\(head\))?$")
-MAX_STORED_HEALTH_AGE = timedelta(minutes=10)
 
 CLAMAV_CHECK = r"""
 import json
@@ -85,8 +84,7 @@ def run_command(args: list[str], timeout: int = 30) -> subprocess.CompletedProce
         args,
         cwd=ROOT,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=timeout,
         check=False,
     )
