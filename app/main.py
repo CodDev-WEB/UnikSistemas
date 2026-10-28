@@ -55,8 +55,6 @@ def health_ready(db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Banco de dados indisponível.") from None
     return {"status": "ready", "database": "ok"}
 
-
-
 @app.get("/metrics", include_in_schema=False, tags=["System"])
 def metrics(
     authorization: str | None = Header(default=None),
