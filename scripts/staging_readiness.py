@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlsplit, urlunsplit
