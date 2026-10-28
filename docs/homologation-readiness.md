@@ -49,10 +49,10 @@ Faça esta etapa apenas numa instalação descartável de homologação. O backu
 
 ## 3. Resiliência do ClamAV
 
-Os testes automatizados do repositório cobrem falha de conexão, resposta inválida, assinaturas antigas, alertas de transição e recuperação:
+Os testes automatizados do repositório cobrem falha de conexão, resposta inválida, assinaturas antigas, alertas de transição e recuperação. O teste do worker confirma também que a fila não é processada enquanto o scanner está indisponível ou as assinaturas estão vencidas, e que o alerta operacional alcança os responsáveis/administradores dos escritórios de teste:
 
 ~~~bash
-pytest -q tests/test_antivirus.py tests/test_api.py -k antivirus
+pytest -q tests/test_antivirus.py tests/test_antivirus_worker.py tests/test_api.py -k antivirus
 ~~~
 
 Para validar o comportamento operacional numa instância descartável, interrompa temporariamente o serviço ClamAV e confirme que a saúde muda para indisponível, os documentos novos permanecem em quarentena e os responsáveis/administradores recebem apenas um alerta por transição. Reinicie o serviço e confirme que há alerta de recuperação e que a fila retoma o processamento quando a saúde volta a healthy.
