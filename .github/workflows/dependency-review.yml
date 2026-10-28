@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   dependency-review:
+    # Enable only after turning on GitHub's dependency graph in repository settings.
+    if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
     name: Review dependency changes
     runs-on: ubuntu-latest
     steps:
