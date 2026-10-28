@@ -90,11 +90,11 @@ jobs:
             -v "$PWD/ops/prometheus:/etc/prometheus:ro" \
             -v "$secret_dir:/run/prometheus-secrets:ro" \
             prom/prometheus:v3.15.1 \
-            promtool check config /etc/prometheus/prometheus.yml
+            check config /etc/prometheus/prometheus.yml
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/ops/prometheus:/etc/prometheus:ro" \
             prom/prometheus:v3.15.1 \
-            promtool check rules /etc/prometheus/alerts.yml
+            check rules /etc/prometheus/alerts.yml
       - name: Validate Grafana dashboard JSON
         run: python -m json.tool ops/grafana/dashboards/unik-operations.json > /dev/null
 
