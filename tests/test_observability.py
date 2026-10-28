@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
@@ -7,13 +8,9 @@ from app.models import AntivirusHealth
 
 
 def test_metrics_token_is_disabled_when_blank_and_requires_reasonable_length():
-    assert Settings(metrics_token="").metrics_token is None
-    try:
-        Settings(metrics_token="short")
-    except ValidationError as exc:
-        assert "METRICS_TOKEN" in str(exc)
-    else:
-        raise AssertionError("A short METRICS_TOKEN should be rejected.")
+    assert Settings(app_env="test", metrics_token="").metrics_token is None
+    with pytest.raises(ValidationError, match="METRICS_TOKEN"):
+        Settings(app_env="test", metrics_token="short")
 
 
 def test_metrics_endpoint_is_disabled_by_default(client):
