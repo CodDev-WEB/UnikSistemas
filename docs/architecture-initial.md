@@ -41,6 +41,7 @@
 - O rate limiting existe no Nginx, mas depende de o proxy externo sobrescrever `X-Real-IP` com o endereço real do cliente; sem essa configuração, muitos usuários podem compartilhar um bucket.
 - A proteção de segredos e banco em produção exige secret manager, política de rotação e ensaios de restauração. Os scripts de backup foram preparados, mas a recuperação ponta a ponta precisa ser comprovada em homologação.
 - O estado do ClamAV e alertas de scanner indisponível/assinaturas antigas são expostos a responsáveis e administradores; alertas internos não substituem monitoramento externo do host.
+- A API tem endpoint Prometheus `/metrics` opcional, protegido por token e desativado por padrão; o coletor externo, armazenamento de séries temporais, dashboards e alertas ainda precisam ser configurados e operados.
 - O deploy precisa de TLS/HTTPS, HSTS na borda, monitoramento externo, backup/restauração e estratégia de retenção de documentos.
 - A autenticação ainda usa token no `sessionStorage`; revisar sessão, proteção contra XSS, recuperação de senha e MFA antes de uso externo.
 - A fila SMTP exige teste real em homologação, política para e-mails antigos acumulados e verificação de entrega/reenvio.
