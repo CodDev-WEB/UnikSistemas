@@ -86,12 +86,12 @@ jobs:
           trap 'rm -rf "$secret_dir"' EXIT
           printf '%s' 'ci-only-token-with-more-than-32-characters' > "$secret_dir/metrics_token"
           chmod 644 "$secret_dir/metrics_token"
-          docker run --rm \
+          docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/ops/prometheus:/etc/prometheus:ro" \
             -v "$secret_dir:/run/prometheus-secrets:ro" \
             prom/prometheus:v3.15.1 \
             promtool check config /etc/prometheus/prometheus.yml
-          docker run --rm \
+          docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/ops/prometheus:/etc/prometheus:ro" \
             prom/prometheus:v3.15.1 \
             promtool check rules /etc/prometheus/alerts.yml
