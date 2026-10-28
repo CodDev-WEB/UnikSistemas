@@ -41,7 +41,9 @@ jobs:
       - name: Run tests
         run: pytest -q
       - name: Validate operational shell scripts
-        run: bash -n scripts/backup.sh scripts/restore.sh scripts/restore-drill.sh
+        run: |
+          bash -n scripts/backup.sh scripts/restore.sh scripts/restore-drill.sh
+          sh -n ops/prometheus/entrypoint.sh ops/grafana/entrypoint.sh
       - name: Validate staging readiness CLI
         run: python scripts/staging_readiness.py --help
       - name: Verify database migrations
@@ -72,6 +74,29 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+          docker compose --profile monitoring config --quiet
+
+  monitoring-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Prometheus scrape configuration and alert rules
+        run: |
+          secret_dir="$(mktemp -d)"
+          trap 'rm -rf "$secret_dir"' EXIT
+          printf '%s' 'ci-only-token-with-more-than-32-characters' > "$secret_dir/metrics_token"
+          chmod 644 "$secret_dir/metrics_token"
+          docker run --rm \\
+            -v "$PWD/ops/prometheus:/etc/prometheus:ro" \\
+            -v "$secret_dir/metrics_token:/run/prometheus-secrets/metrics_token:ro" \\
+            prom/prometheus:v3.15.1 \\
+            promtool check config /etc/prometheus/prometheus.yml
+          docker run --rm \\
+            -v "$PWD/ops/prometheus:/etc/prometheus:ro" \\
+            prom/prometheus:v3.15.1 \\
+            promtool check rules /etc/prometheus/alerts.yml
+      - name: Validate Grafana dashboard JSON
+        run: python -m json.tool ops/grafana/dashboards/unik-operations.json > /dev/null
 
   nginx-config:
     runs-on: ubuntu-latest
