@@ -41,7 +41,7 @@ jobs:
       - name: Run tests
         run: pytest -q
       - name: Validate operational shell scripts
-        run: bash -n scripts/backup.sh scripts/restore.sh
+        run: bash -n scripts/backup.sh scripts/restore.sh scripts/restore-drill.sh
       - name: Validate staging readiness CLI
         run: python scripts/staging_readiness.py --help
       - name: Verify database migrations

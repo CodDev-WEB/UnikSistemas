@@ -47,6 +47,14 @@ Faça esta etapa apenas numa instalação descartável de homologação. O backu
 
 **Nunca execute o ensaio de restauração no ambiente de produção nem com dados reais sem uma janela de manutenção e autorização formal.**
 
+Como etapa adicional não destrutiva para o banco/volume ativos, faça também um ensaio isolado do backup em homologação:
+
+~~~bash
+bash scripts/restore-drill.sh CAMINHO_DO_BACKUP
+~~~
+
+O ensaio só prossegue quando a configuração da API informa `APP_ENV=staging` e o operador digita `RESTORE-UNIK-DRILL`. Ele restaura para um banco e um volume temporários, confere a revisão Alembic e a correspondência entre documentos e payloads e tenta remover os recursos temporários ao terminar. Não execute em produção; consulte [Backup e restauração](backup-restore.md) para limites e recuperação em caso de falha.
+
 ## 3. Resiliência do ClamAV
 
 Os testes automatizados do repositório cobrem falha de conexão, resposta inválida, assinaturas antigas, alertas de transição e recuperação. O teste do worker confirma também que a fila não é processada enquanto o scanner está indisponível ou as assinaturas estão vencidas, e que o alerta operacional alcança os responsáveis/administradores dos escritórios de teste:

@@ -45,6 +45,20 @@ Após uma restauração bem-sucedida, verifique manualmente:
 
 O script só inicia novamente os serviços de aplicação que estavam ativos no início da operação. O banco de dados não é apagado pelo fluxo de backup normal; durante a restauração, o banco da aplicação é recriado a partir do dump escolhido.
 
+## Ensaio isolado de restauração (sem substituir o ambiente ativo)
+
+Para comprovar que um backup é restaurável antes do ensaio operacional completo, execute em um ambiente de homologação **isolado**, com o Docker Compose ativo e a aplicação configurada com `APP_ENV=staging`:
+
+```bash
+bash scripts/restore-drill.sh backups/unik-AAAAmmddTHHMMSSZ
+```
+
+O script verifica os checksums usando apenas os nomes esperados, valida os formatos do dump e do arquivo compactado, e pede a confirmação literal `RESTORE-UNIK-DRILL`. Em seguida, restaura o dump em um banco PostgreSQL temporário e extrai os documentos em um volume Docker separado. Confere a revisão Alembic, tabelas essenciais e se cada documento que não foi marcado como purgado tem um arquivo correspondente. Ao sair, tenta remover o banco e o volume temporários, inclusive em caso de erro.
+
+O script bloqueia execução quando a configuração da API não informa `APP_ENV=staging`. Ainda assim, use somente uma instalação descartável de homologação: a criação temporária de um banco consome espaço e recursos no mesmo servidor PostgreSQL. Se o processo for interrompido abruptamente ou a limpeza automática falhar, verifique recursos com prefixo `unik_restore_drill_` antes de tentar novamente.
+
+Este ensaio não altera o banco principal nem o volume `document_uploads`, e não comprova login real, permissões, entrega SMTP ou comportamento do proxy. Para liberar homologação, continue o roteiro completo de restauração e valide a aplicação após uma restauração efetiva em alvo descartável.
+
 ## Política operacional recomendada
 
 - Defina a frequência conforme a perda de dados aceitável (RPO) e o tempo máximo de recuperação (RTO); não presuma valores sem acordo operacional.
