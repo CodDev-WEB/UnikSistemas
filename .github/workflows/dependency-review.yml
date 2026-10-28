@@ -1,0 +1,24 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    # Enable only after turning on GitHub's dependency graph in repository settings.
+    if: ${{ vars.ENABLE_DEPENDENCY_REVIEW == 'true' }}
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check newly introduced vulnerable dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
