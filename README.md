@@ -22,7 +22,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
 
-Consulte a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md) e o [procedimento de backup e restauração](docs/backup-restore.md).
+Consulte a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md), o [procedimento de backup e restauração](docs/backup-restore.md) e o [roteiro de prontidão em homologação](docs/homologation-readiness.md).
 
 ## Requisitos
 
@@ -50,7 +50,7 @@ As portas estão vinculadas ao loopback por padrão e não expostas diretamente 
 
 ## Backup e restauração
 
-Os scripts `bash scripts/backup.sh` e `bash scripts/restore.sh CAMINHO_DO_BACKUP` geram e restauram em conjunto o dump PostgreSQL e o volume de documentos. O backup valida os arquivos e cria checksums; a restauração exige confirmação explícita e mantém a API/workers parados se houver erro. **Teste a restauração em homologação isolada antes de qualquer uso com dados reais.** O procedimento completo, os arquivos incluídos e a lista de validação estão em [Backup e restauração](docs/backup-restore.md).
+Os scripts `bash scripts/backup.sh` e `bash scripts/restore.sh CAMINHO_DO_BACKUP` geram e restauram em conjunto o dump PostgreSQL e o volume de documentos. O backup valida os arquivos e cria checksums; a restauração exige confirmação explícita e mantém a API/workers parados se houver erro. **Teste a restauração em homologação isolada antes de qualquer uso com dados reais.** O procedimento completo, os arquivos incluídos e a lista de validação estão em [Backup e restauração](docs/backup-restore.md). Antes de liberar homologação, use também `python scripts/staging_readiness.py` e siga o [roteiro de prontidão](docs/homologation-readiness.md); essa pré-verificação não substitui o ensaio real de restauração nem o teste autorizado de SMTP.
 
 ## Provisionar o primeiro escritório
 
