@@ -42,6 +42,8 @@ jobs:
         run: pytest -q
       - name: Validate operational shell scripts
         run: bash -n scripts/backup.sh scripts/restore.sh
+      - name: Validate staging readiness CLI
+        run: python scripts/staging_readiness.py --help
       - name: Verify database migrations
         run: alembic upgrade head
 
