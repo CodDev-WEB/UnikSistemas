@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-only-change-this-secret-to-a-random-value"
     database_url: str = "sqlite:///./unik.db"
     bootstrap_token: str | None = None
+    metrics_token: str | None = None
     access_token_expire_minutes: int = Field(default=60, ge=5, le=1440)
     cors_origins: list[str] = Field(default_factory=list)
     document_storage_path: str = "/var/lib/unik/uploads"
@@ -48,8 +49,17 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("metrics_token", mode="before")
+    @classmethod
+    def blank_metrics_token_to_none(cls, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        return value
+
     @model_validator(mode="after")
     def validate_production_secrets(self):
+        if self.metrics_token is not None and len(self.metrics_token) < 32:
+            raise ValueError("METRICS_TOKEN deve ter pelo menos 32 caracteres quando configurado.")
         try:
             ZoneInfo(self.notification_timezone)
         except ZoneInfoNotFoundError:

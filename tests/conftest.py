@@ -28,6 +28,7 @@ def client(tmp_path) -> Generator[TestClient, None, None]:
         access_token_expire_minutes=30,
         cors_origins=[],
         document_storage_path=str(tmp_path / "uploads"),
+        metrics_token=None,
     )
 
     def override_get_db():
