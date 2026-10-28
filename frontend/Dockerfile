@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /web
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 RUN npm run build
