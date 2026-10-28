@@ -2,19 +2,20 @@
 
 ## Verificações automáticas
 
-O repositório mantém três controles no GitHub Actions:
+O repositório mantém estes controles no GitHub Actions e no Dependabot:
 
 - **CodeQL** analisa o backend Python e o frontend TypeScript/JavaScript em pull requests, pushes para `main` e semanalmente. Os resultados devem ser revistos em **Security → Code scanning**.
-- **Dependency Review** pode examinar alterações de dependências em pull requests e falhar quando uma alteração introduz uma vulnerabilidade alta ou crítica. A execução é condicionada à variável de repositório `ENABLE_DEPENDENCY_REVIEW=true`, pois o GitHub exige que o Dependency graph esteja habilitado. No estado atual, o recurso estava desabilitado; portanto, a verificação fica ignorada até que um administrador habilite o graph e configure a variável em Settings → Secrets and variables → Actions → Variables.
-- **Dependabot** propõe atualizações semanais para dependências Python, imagens declaradas nos arquivos Docker e GitHub Actions.
+- **Dependency Review** pode examinar alterações de dependências em pull requests e falhar quando uma alteração introduz uma vulnerabilidade alta ou crítica. A execução é condicionada à variável de repositório `ENABLE_DEPENDENCY_REVIEW=true`, pois o GitHub exige que o Dependency graph esteja habilitado. Mantenha a variável desativada até confirmar que o graph está habilitado.
+- **Dependabot** propõe atualizações semanais para dependências Python, npm do frontend, imagens declaradas nos arquivos Docker e GitHub Actions.
+- **Frontend reproduzível** usa `frontend/package-lock.json` versionado. CI e build Docker instalam exclusivamente as versões resolvidas com `npm ci`; alterações de dependência devem atualizar o manifesto e o lockfile juntos.
 
 Esses controles complementam a CI existente; não substituem revisão de código, testes, validação de imagens, execução segura ou homologação. Uma análise sem alertas não prova que a aplicação está livre de vulnerabilidades.
 
 ## Como tratar um alerta
 
 1. Identifique o pacote, arquivo afetado, severidade, versão corrigida e caminho de dependência.
-2. Prefira atualizar para uma versão corrigida compatível com os limites declarados. Evite ampliar intervalos de versão sem revisar compatibilidade e impacto.
-3. Execute a CI completa: lint, testes backend, migrações, build frontend e validação de Docker Compose/Nginx.
+2. Prefira atualizar para uma versão corrigida compatível. No frontend, confirme que `package.json` e `package-lock.json` foram alterados juntos; não edite o lockfile manualmente.
+3. Execute a CI completa: lint, testes backend, migrações, `npm ci`, build frontend e validação de Docker Compose/Nginx.
 4. Revise mudanças de comportamento, migrações e notas de lançamento do pacote; nunca habilite merge automático só porque a CI passou.
 5. Se não houver correção compatível, registre o risco, os controles compensatórios, o responsável e a data para reavaliação. Não ignore alertas altos/críticos sem decisão explícita.
 6. Só integre após revisão humana. Atualização de dependências não autoriza deploy.
@@ -22,9 +23,8 @@ Esses controles complementam a CI existente; não substituem revisão de código
 ## Limites e cuidados
 
 - Dependabot pode abrir pull requests de atualização; ele não deve fazer merge nem implantar a aplicação automaticamente.
-- Os manifests Python usam intervalos de versão, portanto não constituem por si só um inventário imutável do ambiente implantado. Para reproduzir builds, adote posteriormente um processo de lock/constraints e uma estratégia de atualização testada.
-- O frontend ainda não mantém lockfile npm versionado; por isso, o controle atual do Dependabot não declara uma rotina npm. Adote e versione um lockfile antes de habilitar atualizações automatizadas específicas do npm.
-- Resultados do CodeQL e Dependency Review dependem das permissões e funcionalidades de segurança habilitadas no repositório. Confirme após a primeira execução que os resultados foram publicados e que os controles estão atuando nos pull requests. O Dependency Review deve permanecer condicionado até que o Dependency graph esteja realmente ativado; não habilite a variável apenas para forçar a execução.
+- Os manifests Python ainda usam intervalos de versão, portanto não constituem por si só um inventário imutável do backend implantado. Considere posteriormente um processo de lock/constraints para Python.
+- Resultados do CodeQL e Dependency Review dependem das permissões e funcionalidades de segurança habilitadas no repositório. Confirme que os resultados foram publicados e que os controles estão atuando nos pull requests. A análise de dependências deve permanecer condicionada até que o Dependency graph esteja realmente ativado; não habilite a variável apenas para forçar a execução.
 - Não publique tokens, arquivos `.env`, relatórios que contenham segredos nem dados reais de clientes em issues ou logs.
 
 ## Operação
