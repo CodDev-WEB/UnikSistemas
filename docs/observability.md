@@ -31,10 +31,10 @@ Sem o token correto, a API responde HTTP 401; com o endpoint desativado, respond
 | `unik_antivirus_last_success_timestamp_seconds` | Timestamp Unix da última verificação bem-sucedida; 0 significa que não há registro. |
 | `unik_antivirus_last_check_timestamp_seconds` | Timestamp Unix da última verificação do ClamAV; 0 significa desconhecido. |
 | `unik_antivirus_last_cleanup_timestamp_seconds` | Timestamp Unix do último ciclo registrado de limpeza da quarentena; 0 significa desconhecido. |
-| `unik_documents_scan_status_total{status=...}` | Quantidade de documentos por estado de análise antimalware: pendente, em análise, limpo, infectado ou erro. |
-| `unik_documents_infected_payloads_waiting_retention_total` | Quantidade de payloads infectados ainda aguardando a limpeza por retenção. |
-| `unik_documents_stale_scans_total` | Análises que continuam como `scanning` apesar de não haver tentativa registrada nos últimos cinco minutos. |
-| `unik_notification_email_status_total{status=...}` | Quantidade de notificações na fila SMTP por estado: pendente, enviada ou falha. |
+| `unik_documents_scan_status_count{status=...}` | Quantidade de documentos por estado de análise antimalware: pendente, em análise, limpo, infectado ou erro. |
+| `unik_documents_infected_payloads_waiting_retention_count` | Quantidade de payloads infectados ainda aguardando a limpeza por retenção. |
+| `unik_documents_stale_scans_count` | Análises que continuam como `scanning` apesar de não haver tentativa registrada nos últimos cinco minutos. |
+| `unik_notification_email_status_count{status=...}` | Quantidade de notificações na fila SMTP por estado: pendente, enviada ou falha. |
 
 Os valores são agregados para a instalação inteira e têm conjuntos de rótulos limitados. Não são expostos nomes, e-mails, documentos, chaves de storage, IDs de escritórios ou texto de erros. Métricas de timestamp com valor 0 não comprovam atividade; trate-as como ausência de evidência.
 
@@ -47,11 +47,11 @@ sum(unik_antivirus_health_status{status="healthy"}) == 0
 ```
 
 ```promql
-unik_documents_scan_status_total{status="error"} > 0
+unik_documents_scan_status_count{status="error"} > 0
 ```
 
 ```promql
-unik_documents_stale_scans_total > 0
+unik_documents_stale_scans_count > 0
 ```
 
 ```promql
