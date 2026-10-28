@@ -22,7 +22,7 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
 
-Consulte a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md), o [procedimento de backup e restauração](docs/backup-restore.md) e o [roteiro de prontidão em homologação](docs/homologation-readiness.md).
+Consulte a [política de manutenção de dependências e segurança](docs/security-maintenance.md), a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md), o [procedimento de backup e restauração](docs/backup-restore.md) e o [roteiro de prontidão em homologação](docs/homologation-readiness.md).
 
 ## Requisitos
 
