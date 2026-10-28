@@ -5,7 +5,7 @@
 O repositório mantém três controles no GitHub Actions:
 
 - **CodeQL** analisa o backend Python e o frontend TypeScript/JavaScript em pull requests, pushes para `main` e semanalmente. Os resultados devem ser revistos em **Security → Code scanning**.
-- **Dependency Review** examina alterações de dependências em pull requests e falha quando uma alteração introduz uma vulnerabilidade classificada como alta ou crítica.
+- **Dependency Review** pode examinar alterações de dependências em pull requests e falhar quando uma alteração introduz uma vulnerabilidade alta ou crítica. A execução é condicionada à variável de repositório `ENABLE_DEPENDENCY_REVIEW=true`, pois o GitHub exige que o Dependency graph esteja habilitado. No estado atual, o recurso estava desabilitado; portanto, a verificação fica ignorada até que um administrador habilite o graph e configure a variável em Settings → Secrets and variables → Actions → Variables.
 - **Dependabot** propõe atualizações semanais para dependências Python, imagens declaradas nos arquivos Docker e GitHub Actions.
 
 Esses controles complementam a CI existente; não substituem revisão de código, testes, validação de imagens, execução segura ou homologação. Uma análise sem alertas não prova que a aplicação está livre de vulnerabilidades.
@@ -24,7 +24,7 @@ Esses controles complementam a CI existente; não substituem revisão de código
 - Dependabot pode abrir pull requests de atualização; ele não deve fazer merge nem implantar a aplicação automaticamente.
 - Os manifests Python usam intervalos de versão, portanto não constituem por si só um inventário imutável do ambiente implantado. Para reproduzir builds, adote posteriormente um processo de lock/constraints e uma estratégia de atualização testada.
 - O frontend ainda não mantém lockfile npm versionado; por isso, o controle atual do Dependabot não declara uma rotina npm. Adote e versione um lockfile antes de habilitar atualizações automatizadas específicas do npm.
-- Resultados do CodeQL e Dependency Review dependem das permissões e funcionalidades de segurança habilitadas no repositório. Confirme após a primeira execução que os resultados foram publicados e que os controles estão atuando nos pull requests.
+- Resultados do CodeQL e Dependency Review dependem das permissões e funcionalidades de segurança habilitadas no repositório. Confirme após a primeira execução que os resultados foram publicados e que os controles estão atuando nos pull requests. O Dependency Review deve permanecer condicionado até que o Dependency graph esteja realmente ativado; não habilite a variável apenas para forçar a execução.
 - Não publique tokens, arquivos `.env`, relatórios que contenham segredos nem dados reais de clientes em issues ou logs.
 
 ## Operação
