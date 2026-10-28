@@ -52,7 +52,7 @@ As portas estão vinculadas ao loopback por padrão e não expostas diretamente 
 
 ### Monitoramento externo (opcional)
 
-A API oferece `GET /metrics) em formato Prometheus para monitoramento operacional agregado. O endpoint fica desativado (404) por padrão. Para habilitá-lo, gere e configure `METRICS_TOKEN` com pelo menos 32 caracteres aleatórios e envie-o no cabeçalho `Authorization: Bearer ...`. Não exponha esse endpoint publicamente: limite-o à rede do coletor de métricas e configure firewall/proxy para permitir somente origens confiáveis. O endpoint não retorna identificadores de escritório, clientes ou usuários. Veja [Observabilidade externa](docs/observability.md) para métricas disponíveis e exemplos de alertas; o sistema não instala nem hospeda Prometheus/Grafana.
+A API oferece `GET /metrics` em formato Prometheus para monitoramento operacional agregado. O endpoint fica desativado (404) por padrão. Para habilitá-lo, gere e configure `METRICS_TOKEN` com pelo menos 32 caracteres aleatórios e envie-o no cabeçalho `Authorization: Bearer ...`. Não exponha esse endpoint publicamente: limite-o à rede do coletor de métricas e configure firewall/proxy para permitir somente origens confiáveis. O endpoint não retorna identificadores de escritório, clientes ou usuários. Veja [Observabilidade externa](docs/observability.md) para métricas disponíveis e exemplos de alertas; o sistema não instala nem hospeda Prometheus/Grafana.
 
 ## Backup e restauração
 
@@ -100,7 +100,7 @@ O CI executa lint, testes do backend e migração contra PostgreSQL, além de co
 
 - E-mails automáticos enviados aos clientes, convites por e-mail, recuperação de senha e MFA.
 - Integrações fiscais, envio de declarações ou automações irreversíveis.
-- Observabilidade externa e restauração de backup validada em homologação.
+- Coletor, dashboards e alertas externos configurados, além da restauração de backup validada em homologação.
 - Estratégia de sessão adequada para produção, gestão de segredos e implantação com HTTPS.
 - Revisão contínua do scanner e plano de resposta a incidentes.
 
