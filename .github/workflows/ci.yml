@@ -86,6 +86,7 @@ jobs:
           trap 'rm -rf "$secret_dir"' EXIT
           printf '%s' 'ci-only-token-with-more-than-32-characters' > "$secret_dir/metrics_token"
           chmod 644 "$secret_dir/metrics_token"
+          chmod 755 "$secret_dir"
           docker run --rm --entrypoint /bin/promtool \
             -v "$PWD/ops/prometheus:/etc/prometheus:ro" \
             -v "$secret_dir:/run/prometheus-secrets:ro" \
