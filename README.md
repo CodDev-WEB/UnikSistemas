@@ -52,7 +52,26 @@ As portas estão vinculadas ao loopback por padrão e não expostas diretamente 
 
 ### Monitoramento externo (opcional)
 
-A API oferece `GET /metrics` em formato Prometheus para monitoramento operacional agregado. O endpoint fica desativado (404) por padrão. Para habilitá-lo, gere e configure `METRICS_TOKEN` com pelo menos 32 caracteres aleatórios e envie-o no cabeçalho `Authorization: Bearer ...`. Não exponha esse endpoint publicamente: limite-o à rede do coletor de métricas e configure firewall/proxy para permitir somente origens confiáveis. O endpoint não retorna identificadores de escritório, clientes ou usuários. Veja [Observabilidade externa](docs/observability.md) para métricas disponíveis e exemplos de alertas; o sistema não instala nem hospeda Prometheus/Grafana.
+A API oferece `GET /metrics` com métricas agregadas para Prometheus. O endpoint fica desativado (404) enquanto `METRICS_TOKEN` estiver vazio e exige Bearer token quando habilitado. As métricas não incluem identificadores de escritório, clientes, usuários ou documentos.
+
+Para habilitar o stack opcional local, edite o `.env` e defina:
+- `METRICS_TOKEN`: gere um token aleatório com pelo menos 32 caracteres.
+- `GRAFANA_ADMIN_PASSWORD`: senha aleatória com pelo menos 24 caracteres.
+- `GRAFANA_ADMIN_USER`: opcional; por padrão, `admin`.
+
+Gere valores com `python -c "import secrets; print(secrets.token_urlsafe(48))"`. Nunca reutilize os valores de exemplo nem compartilhe o arquivo `.env`.
+
+Inicie os serviços de monitoramento sem alterar o fluxo padrão da aplicação:
+
+```bash
+docker compose --profile monitoring up -d prometheus grafana
+```
+
+Acesse Prometheus em <http://127.0.0.1:9090> e Grafana em <http://127.0.0.1:3001>. As duas portas ficam vinculadas ao loopback; não as publique na internet. O dashboard **UnikSistemas — Operações**, a fonte Prometheus e as regras de alerta são provisionados automaticamente. Para ver o estado do stack, use `docker compose --profile monitoring logs -f prometheus grafana`.
+
+O perfil só inicia quando você o ativa explicitamente e não está incluído em `docker compose up` padrão. Se alterar o token na API, atualize o mesmo valor no ambiente do Prometheus e recrie os dois serviços para que a coleta continue autenticada. A senha do Grafana precisa estar definida antes de iniciar o perfil.
+
+**Limite importante:** as regras aparecem em Prometheus, mas não enviam mensagens por conta própria. Para entrega externa (e-mail, webhook ou pager), configure um Alertmanager com destinatários autorizados e teste o fluxo em homologação. Consulte [Observabilidade externa](docs/observability.md) para as métricas, alertas e limites de segurança.
 
 ## Backup e restauração
 

@@ -1,0 +1,57 @@
+groups:
+  - name: unik-operational-alerts
+    interval: 30s
+    rules:
+      - alert: UnikMetricsTargetDown
+        expr: up{job="unik-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Endpoint de métricas do UnikSistemas indisponível"
+          description: "Prometheus não consegue consultar /metrics na API há pelo menos 2 minutos. Verifique API, token e conectividade interna."
+
+      - alert: UnikClamAVNotHealthy
+        expr: max(unik_antivirus_health_status{status="healthy"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ClamAV não está saudável"
+          description: "O worker deve manter novos documentos em quarentena enquanto a disponibilidade e a atualidade do scanner não forem confirmadas."
+
+      - alert: UnikClamAVHealthCheckStale
+        expr: time() - unik_antivirus_last_check_timestamp_seconds > 600
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Verificação do ClamAV atrasada"
+          description: "A última verificação registrada do scanner tem mais de 10 minutos ou ainda não foi registrada."
+
+      - alert: UnikDocumentScanErrors
+        expr: unik_documents_scan_status_count{status="error"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Há documentos com análise antimalware em erro"
+          description: "Existem documentos cuja análise esgotou as tentativas automáticas. Revise a fila e reenvie a análise somente após verificar o scanner."
+
+      - alert: UnikDocumentScansStale
+        expr: unik_documents_stale_scans_count > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Há análises de documentos paradas"
+          description: "Um ou mais documentos permanecem no estado scanning sem tentativa recente. Verifique o worker e o banco de dados."
+
+      - alert: UnikNotificationEmailFailures
+        expr: unik_notification_email_status_count{status="failed"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Há notificações com falha na fila de e-mail"
+          description: "Revise a configuração SMTP e os erros registrados antes de tentar reenviar mensagens."

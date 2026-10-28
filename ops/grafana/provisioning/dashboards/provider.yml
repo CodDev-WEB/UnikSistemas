@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: UnikSistemas
+    orgId: 1
+    folder: Operações
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/unik/dashboards
