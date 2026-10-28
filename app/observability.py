@@ -86,13 +86,13 @@ def render_prometheus_metrics(db: Session, now: datetime | None = None) -> str:
     )
     lines.extend(
         [
-            "# HELP unik_documents_scan_status_total Number of documents in each antimalware scan state.",
-            "# TYPE unik_documents_scan_status_total gauge",
+            "# HELP unik_documents_scan_status_count Number of documents in each antimalware scan state.",
+            "# TYPE unik_documents_scan_status_count gauge",
         ]
     )
     for status in SCAN_STATUSES:
         lines.append(
-            _sample("unik_documents_scan_status_total", int(scan_counts.get(status, 0)), {"status": status})
+            _sample("unik_documents_scan_status_count", int(scan_counts.get(status, 0)), {"status": status})
         )
 
     infected_waiting = _count(
@@ -104,9 +104,9 @@ def render_prometheus_metrics(db: Session, now: datetime | None = None) -> str:
     )
     lines.extend(
         [
-            "# HELP unik_documents_infected_payloads_waiting_retention_total Infected file payloads still awaiting retention cleanup.",
-            "# TYPE unik_documents_infected_payloads_waiting_retention_total gauge",
-            _sample("unik_documents_infected_payloads_waiting_retention_total", infected_waiting),
+            "# HELP unik_documents_infected_payloads_waiting_retention_count Infected file payloads still awaiting retention cleanup.",
+            "# TYPE unik_documents_infected_payloads_waiting_retention_count gauge",
+            _sample("unik_documents_infected_payloads_waiting_retention_count", infected_waiting),
         ]
     )
 
@@ -121,9 +121,9 @@ def render_prometheus_metrics(db: Session, now: datetime | None = None) -> str:
     )
     lines.extend(
         [
-            "# HELP unik_documents_stale_scans_total Documents marked scanning without a recent attempt.",
-            "# TYPE unik_documents_stale_scans_total gauge",
-            _sample("unik_documents_stale_scans_total", stale_scans),
+            "# HELP unik_documents_stale_scans_count Documents marked scanning without a recent attempt.",
+            "# TYPE unik_documents_stale_scans_count gauge",
+            _sample("unik_documents_stale_scans_count", stale_scans),
         ]
     )
 
@@ -136,13 +136,13 @@ def render_prometheus_metrics(db: Session, now: datetime | None = None) -> str:
     )
     lines.extend(
         [
-            "# HELP unik_notification_email_status_total Notifications in each SMTP queue state.",
-            "# TYPE unik_notification_email_status_total gauge",
+            "# HELP unik_notification_email_status_count Notifications in each SMTP queue state.",
+            "# TYPE unik_notification_email_status_count gauge",
         ]
     )
     for status in EMAIL_STATUSES:
         lines.append(
-            _sample("unik_notification_email_status_total", int(email_counts.get(status, 0)), {"status": status})
+            _sample("unik_notification_email_status_count", int(email_counts.get(status, 0)), {"status": status})
         )
 
     return "\n".join(lines) + "\n"
