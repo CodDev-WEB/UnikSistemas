@@ -19,8 +19,10 @@ O **UnikSistemas** está começando como uma plataforma web para apoiar escritó
 - Recebimento público em quarentena com análise ClamAV assíncrona; downloads e conferência ficam bloqueados até o resultado limpo.
 - Caixa de notificações por usuário, alertas diários de prazo e fila de e-mail SMTP opcional para a equipe.
 - Interface React + TypeScript com login, painel, busca/filtro e formulário de clientes.
+- Lockfile npm versionado; CI e imagem Docker usam `npm ci` para instalação reproduzível do frontend.
 - Nginx servindo a aplicação web e encaminhando chamadas de API pelo mesmo domínio/origem.
 - Docker Compose, testes de API, Ruff e GitHub Actions para backend e build do frontend.
+- Análise CodeQL e atualizações automatizadas de dependências via Dependabot.
 
 Consulte a [política de manutenção de dependências e segurança](docs/security-maintenance.md), a [arquitetura inicial](docs/architecture-initial.md), o [briefing do sistema contábil](docs/briefing-sistema-contabil.md), o [procedimento de backup e restauração](docs/backup-restore.md) e o [roteiro de prontidão em homologação](docs/homologation-readiness.md).
 
@@ -36,56 +38,30 @@ Consulte a [política de manutenção de dependências e segurança](docs/securi
 2. Troque `SECRET_KEY`, `BOOTSTRAP_TOKEN` e `POSTGRES_PASSWORD` por valores aleatórios fortes. Atualize também a senha na `DATABASE_URL`; os dois valores precisam corresponder. Para evitar erros de codificação da URL, prefira uma senha aleatória alfanumérica longa ou codifique os caracteres reservados. Nunca use os valores de exemplo em qualquer ambiente compartilhado.
 3. Inicie a API, PostgreSQL e frontend:
 
+    ```bash
     docker compose up --build -d
     docker compose logs -f api frontend notification-worker document-scan-worker clamav
+    ```
 
-4. Acesse a interface em <http://127.0.0.1:3000> e a documentação da API em <http://127.0.0.1:8000/docs>.
+4. Acesse a interface em <http://127.0.0.1:3000>.
 
-Verificações de saúde:
-- <http://127.0.0.1:8000/health/live>
-- <http://127.0.0.1:8000/health/ready>
-- <http://127.0.0.1:3000/health>
+Para desenvolvimento local do frontend, dentro de `frontend/` execute `npm ci` e depois `npm run dev`.
 
-As portas estão vinculadas ao loopback por padrão e não expostas diretamente para a rede local.
-
-## Backup e restauração
-
-Os scripts `bash scripts/backup.sh` e `bash scripts/restore.sh CAMINHO_DO_BACKUP` geram e restauram em conjunto o dump PostgreSQL e o volume de documentos. O backup valida os arquivos e cria checksums; a restauração exige confirmação explícita e mantém a API/workers parados se houver erro. **Teste a restauração em homologação isolada antes de qualquer uso com dados reais.** O procedimento completo, os arquivos incluídos e a lista de validação estão em [Backup e restauração](docs/backup-restore.md). Antes de liberar homologação, use também `python scripts/staging_readiness.py` e siga o [roteiro de prontidão](docs/homologation-readiness.md); essa pré-verificação não substitui o ensaio real de restauração nem o teste autorizado de SMTP.
-
-## Provisionar o primeiro escritório
-
-O segredo de provisionamento em `BOOTSTRAP_TOKEN` deve ser usado apenas pelo operador autorizado. Exemplo via curl:
-
-    curl -X POST http://127.0.0.1:8000/api/v1/setup/tenants \
-      -H "Content-Type: application/json" \
-      -H "X-Bootstrap-Token: SUBSTITUA_PELO_SEU_SEGREDO" \
-      -d '{
-        "tenant_name": "Escritório Exemplo",
-        "tenant_slug": "escritorio-exemplo",
-        "owner_email": "responsavel@example.com",
-        "owner_full_name": "Responsável do Escritório",
-        "owner_password": "Use-Uma-Senha-Forte-Aqui-2026"
-      }'
-
-Na primeira versão, o provisionamento é uma operação do operador, não um cadastro público. Depois, entre na interface usando o slug do escritório, e-mail e senha do usuário owner criado. O frontend armazena o token no `sessionStorage` e o descarta ao sair; antes de produção, a estratégia de sessão deve passar por revisão específica de segurança.
-
-**Não comite `.env` e não compartilhe o segredo de provisionamento.** Rotacione/remova `BOOTSTRAP_TOKEN` quando não for mais necessário.
-
-## Executar testes localmente
+## Verificações de qualidade
 
 Backend:
 
     python -m venv .venv
-    # Windows PowerShell: .venv\Scripts\Activate.ps1
+    # Windows: .venv\Scripts\Activate.ps1
     # Linux/macOS: source .venv/bin/activate
     pip install -r requirements-dev.txt
-    ruff check app tests
+    ruff check app tests scripts
     pytest -q
 
 Frontend:
 
     cd frontend
-    npm install
+    npm ci
     npm run build
 
 O CI executa lint, testes do backend e migração contra PostgreSQL, além de compilar o frontend.
@@ -125,7 +101,6 @@ Endpoints: `GET /api/v1/tasks?limit=100` com filtros opcionais `status` e `clien
 Este módulo é um controle operacional manual. Pendências do tipo Documento podem gerar um link temporário de envio: o link expira em 7 dias, admite até 5 arquivos e pode ser revogado pela equipe; a emissão de um novo link invalida o anterior. O portal aceita PDF, PNG, JPG, CSV, XLSX e DOCX, com limite de 10 MiB por arquivo e verificação básica do formato. A equipe autenticada pode baixar os anexos e registrar conferência ou pedido de correção; downloads, recebimentos e revisões geram auditoria. O recebimento não envia e-mails nem transmite declarações, calcula tributos ou executa prazos fiscais automaticamente.
 
 O armazenamento padrão usa volume persistente Docker (`document_uploads`) no caminho configurado por `DOCUMENT_STORAGE_PATH`. Antes de produção, configure HTTPS, limites de taxa, antivírus/inspeção de arquivos, política de retenção e backup testado. Não compartilhe links de envio em canais públicos; quem possui o link pode enviar arquivos para a pendência correspondente.
-
 
 ## Central de notificações e alertas
 
